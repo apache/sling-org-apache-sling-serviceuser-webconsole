@@ -21,7 +21,7 @@
 
 	<artifactId>org.apache.sling.serviceuser.webconsole</artifactId>
 	<packaging>bundle</packaging>
-	<version>1.0.0</version>
+	<version>1.0.1-SNAPSHOT</version>
 
 	<name>Apache Sling Service User Web Console</name>
 	<description>
@@ -32,7 +32,7 @@
 		<connection>scm:git:https://gitbox.apache.org/repos/asf/sling-org-apache-sling-serviceuser-webconsole.git</connection>
 		<developerConnection>scm:git:https://gitbox.apache.org/repos/asf/sling-org-apache-sling-serviceuser-webconsole.git</developerConnection>
 		<url>https://gitbox.apache.org/repos/asf?p=sling-org-apache-sling-serviceuser-webconsole.git</url>
-		<tag>org.apache.sling.serviceuser.webconsole-1.0.0</tag>
+		<tag>HEAD</tag>
 	</scm>
 
 	<build>
