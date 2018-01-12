@@ -21,6 +21,7 @@ package org.apache.sling.serviceuser.webconsole.impl;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.reflect.Array;
+import java.net.URL;
 import java.net.URLEncoder;
 import java.security.Principal;
 import java.util.ArrayList;
@@ -35,7 +36,6 @@ import java.util.Map;
 import java.util.Map.Entry;
 
 import javax.jcr.AccessDeniedException;
-import javax.jcr.Property;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 import javax.jcr.UnsupportedRepositoryOperationException;
@@ -56,17 +56,20 @@ import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.felix.webconsole.SimpleWebConsolePlugin;
+import org.apache.felix.webconsole.AbstractWebConsolePlugin;
 import org.apache.felix.webconsole.WebConsoleConstants;
 import org.apache.felix.webconsole.WebConsoleUtil;
+import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.api.security.principal.PrincipalManager;
 import org.apache.jackrabbit.api.security.user.Authorizable;
 import org.apache.jackrabbit.api.security.user.User;
 import org.apache.jackrabbit.api.security.user.UserManager;
+import org.apache.sling.api.resource.LoginException;
 import org.apache.sling.api.resource.ModifiableValueMap;
 import org.apache.sling.api.resource.PersistenceException;
 import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ResourceResolver;
+import org.apache.sling.api.resource.ResourceResolverFactory;
 import org.apache.sling.api.resource.ResourceUtil;
 import org.apache.sling.api.resource.ValueMap;
 import org.apache.sling.jcr.base.util.AccessControlUtil;
@@ -93,11 +96,7 @@ import org.slf4j.LoggerFactory;
 		WebConsoleConstants.PLUGIN_TITLE + "=" + ServiceUserWebConsolePlugin.TITLE,
 		WebConsoleConstants.PLUGIN_CATEGORY + "=Sling" })
 @SuppressWarnings("serial")
-public class ServiceUserWebConsolePlugin extends SimpleWebConsolePlugin {
-
-	public ServiceUserWebConsolePlugin() {
-		super(LABEL, TITLE, "Sling", new String[0]);
-	}
+public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
 
 	public static final String COMPONENT_NAME = "org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl.amended";
 	public static final String LABEL = "serviceusers";
@@ -119,6 +118,9 @@ public class ServiceUserWebConsolePlugin extends SimpleWebConsolePlugin {
 	@Reference(policyOption = ReferencePolicyOption.GREEDY)
 	private XSSAPI xss;
 
+	@Reference(policyOption = ReferencePolicyOption.GREEDY)
+	private ResourceResolverFactory resolverFactory;
+
 	@Reference
 	private ServiceUserMapper mapper;
 
@@ -137,11 +139,11 @@ public class ServiceUserWebConsolePlugin extends SimpleWebConsolePlugin {
 				config = configs.next();
 				log.debug("Using existing configuration {}", config);
 			} else {
-				String path = appPath + "/config/" + COMPONENT_NAME + "-" + appPath.substring(appPath.lastIndexOf('/'));
+				String path = appPath + "/config/" + COMPONENT_NAME + "-" + appPath.substring(appPath.lastIndexOf('/') + 1);
 				log.debug("Creating new configuration {}", path);
 				config = ResourceUtil.getOrCreateResource(resolver, path, new HashMap<String, Object>() {
 					{
-						put(Property.JCR_PRIMARY_TYPE, "sling:OsgiConfig");
+						put(JcrConstants.JCR_PRIMARYTYPE, "sling:OsgiConfig");
 					}
 				}, NodeType.NT_FOLDER, false);
 				dirty = true;
@@ -221,102 +223,6 @@ public class ServiceUserWebConsolePlugin extends SimpleWebConsolePlugin {
 			}
 		}
 
-	}
-
-	private boolean updatePrivileges(HttpServletRequest request, ResourceResolver resolver) {
-
-		List<Pair<String, String>> privileges = this.getPrivileges(request);
-		String name = getParameter(request, PN_NAME, "");
-
-		List<String> currentPolicies = new ArrayList<String>();
-		findACLs(resolver, name, currentPolicies);
-		for (int i = 0; i < currentPolicies.size(); i++) {
-			String path = StringUtils.substringBefore(currentPolicies.get(i), "/rep:policy");
-			currentPolicies.set(i, StringUtils.isNotBlank(path) ? path : "/");
-		}
-		log.debug("Loaded current policy paths: {}", currentPolicies);
-
-		Map<String, List<String>> toSet = new HashMap<String, List<String>>();
-		for (Pair<String, String> privilege : privileges) {
-			if (!toSet.containsKey(privilege.getKey())) {
-				toSet.put(privilege.getKey(), new ArrayList<String>());
-			}
-			toSet.get(privilege.getKey()).add(privilege.getValue());
-		}
-		log.debug("Loaded updated policy paths: {}", currentPolicies);
-
-		String lastEntry = null;
-
-		try {
-
-			Session session = resolver.adaptTo(Session.class);
-			AccessControlManager accessManager = session.getAccessControlManager();
-			PrincipalManager principalManager = AccessControlUtil.getPrincipalManager(session);
-
-			for (Entry<String, List<String>> pol : toSet.entrySet()) {
-				lastEntry = pol.getKey();
-				currentPolicies.remove(pol.getKey());
-				log.debug("Updating policies for {}", pol.getKey());
-
-				AccessControlPolicy[] policies = accessManager.getPolicies(pol.getKey());
-				List<String> toRemove = new ArrayList<String>();
-				for (AccessControlPolicy p : policies) {
-					if (p instanceof AccessControlList) {
-						AccessControlList policy = (AccessControlList) p;
-						for (AccessControlEntry entry : policy.getAccessControlEntries()) {
-							Principal prin = entry.getPrincipal();
-							if (prin.getName().equals(name)) {
-								for (Privilege privilege : entry.getPrivileges()) {
-									if (!pol.getValue().contains(privilege.getName())) {
-										log.debug("Removing privilege {}", privilege);
-										toRemove.add(privilege.getName());
-									}
-								}
-							}
-						}
-					}
-				}
-				Principal principal = principalManager.getPrincipal(name);
-				AccessControlUtil.replaceAccessControlEntry(session, pol.getKey(), principal,
-						pol.getValue().toArray(new String[pol.getValue().size()]), new String[0],
-						toRemove.toArray(new String[toRemove.size()]), null);
-			}
-			session.save();
-
-			for (String oldPolicy : currentPolicies) {
-				boolean removed = false;
-				log.debug("Removing policy for {}", oldPolicy);
-				AccessControlPolicy[] policies = accessManager.getPolicies(oldPolicy);
-				AccessControlEntry toRemove = null;
-				for (AccessControlPolicy p : policies) {
-					if (p instanceof AccessControlList) {
-						AccessControlList policy = (AccessControlList) p;
-						for (AccessControlEntry entry : policy.getAccessControlEntries()) {
-							Principal prin = entry.getPrincipal();
-							if (prin.getName().equals(name)) {
-								toRemove = entry;
-								break;
-							}
-						}
-						if (toRemove != null) {
-							removed = true;
-							policy.removeAccessControlEntry(toRemove);
-							accessManager.setPolicy(oldPolicy, policy);
-							session.save();
-							log.debug("Removed access control entry {}", toRemove);
-						}
-					}
-				}
-				if (!removed) {
-					log.warn("No policy found for {}", oldPolicy);
-				}
-			}
-		} catch (RepositoryException e) {
-			log.error("Exception updating principals with {}, failed on {}", toSet, lastEntry, e);
-			return false;
-		}
-
-		return true;
 	}
 
 	private List<String> extractPrincipals(Mapping mapping) {
@@ -404,6 +310,11 @@ public class ServiceUserWebConsolePlugin extends SimpleWebConsolePlugin {
 		return bundles;
 	}
 
+	@Override
+	public String getLabel() {
+		return LABEL;
+	}
+
 	private Resource getOrCreateServiceUser(HttpServletRequest request, ResourceResolver resolver) {
 
 		final String name = getParameter(request, PN_NAME, "");
@@ -450,10 +361,84 @@ public class ServiceUserWebConsolePlugin extends SimpleWebConsolePlugin {
 		return defaultValue;
 	}
 
+	private List<Pair<String, String>> getPrivileges(HttpServletRequest request) {
+		List<Pair<String, String>> privileges = new ArrayList<Pair<String, String>>();
+		List<String> params = Collections.list(request.getParameterNames());
+
+		for (String param : params) {
+			if (param.startsWith("acl-path-")) {
+				String path = request.getParameter(param);
+				String privilege = request.getParameter(param.replace("-path-", "-privilege-"));
+				if (StringUtils.isNotBlank(path) && StringUtils.isNotBlank(privilege)) {
+					privileges.add(new ImmutablePair<String, String>(path, privilege));
+				} else {
+					log.warn("Unable to load ACL due to missing value {}={}", path, privilege);
+				}
+			}
+		}
+
+		return privileges;
+	}
+
+	@SuppressWarnings("deprecation")
 	private ResourceResolver getResourceResolver(HttpServletRequest request) {
-		ResourceResolver resolver = (ResourceResolver) request
-				.getAttribute("org.apache.sling.auth.core.ResourceResolver");
+		ResourceResolver resolver = null;
+		try {
+			resolver = (ResourceResolver) request.getAttribute("org.apache.sling.auth.core.ResourceResolver");
+			if (resolver == null) {
+				log.warn("Resource resolver not available in request, falling back to adminstrative resource resolver");
+				resolver = resolverFactory.getAdministrativeResourceResolver(null);
+			}
+		} catch (LoginException le) {
+			throw new RuntimeException(
+					"Unable to get Administrative Resource Resolver, add the bundle org.apache.sling.serviceuser.webconsole in the Apache Sling Login Admin Whitelist",
+					le);
+		}
 		return resolver;
+	}
+
+	/**
+	 * Called internally by {@link AbstractWebConsolePlugin} to load resources.
+	 *
+	 * This particular implementation depends on the label. As example, if the
+	 * plugin is accessed as <code>/system/console/abc</code>, and the plugin
+	 * resources are accessed like
+	 * <code>/system/console/abc/res/logo.gif</code>, the code here will try
+	 * load resource <code>/res/logo.gif</code> from the bundle, providing the
+	 * plugin.
+	 *
+	 *
+	 * @param path
+	 *            the path to read.
+	 * @return the URL of the resource or <code>null</code> if not found.
+	 */
+	protected URL getResource(String path) {
+		String base = "/" + LABEL + "/";
+		return (path != null && path.startsWith(base)) ? getClass().getResource(path.substring(base.length() - 1))
+				: null;
+	}
+
+	private String[] getSupportedPrivileges(HttpServletRequest request) {
+		String[] names = null;
+		try {
+			ResourceResolver resolver = getResourceResolver(request);
+			Session session = resolver.adaptTo(Session.class);
+			AccessControlManager accessControl = session.getAccessControlManager();
+			Privilege[] privileges = accessControl.getSupportedPrivileges("/");
+			names = new String[privileges.length];
+			for (int i = 0; i < privileges.length; i++) {
+				names[i] = privileges[i].getName();
+			}
+			Arrays.sort(names);
+		} catch (RepositoryException re) {
+			log.error("Exception loading Supported Privileges", re);
+		}
+		return names;
+	}
+
+	@Override
+	public String getTitle() {
+		return TITLE;
 	}
 
 	private boolean hasPrincipal(Mapping map, String name) {
@@ -531,6 +516,48 @@ public class ServiceUserWebConsolePlugin extends SimpleWebConsolePlugin {
 			}
 		}
 
+	}
+
+	private void printPrivilegeSelect(PrintWriter pw, String label, List<Pair<String, String>> privileges,
+			String[] supportedPrivileges, String alertMessage) {
+		pw.print("<td style='width:20%'>");
+		pw.print(xss.encodeForHTMLAttr(label));
+		pw.println("</td>");
+		pw.print("<td><table class=\"repeating-container\" style=\"width: 100%\" data-length=\"" + privileges.size()
+				+ "\"><tr><td>Path</td><td>Privilege</td><td></td>");
+
+		int idx = 0;
+		for (Pair<String, String> privilege : privileges) {
+			pw.print("</tr><tr class=\"repeating-item\"><td>");
+
+			pw.print("<input type=\"text\"  name=\"acl-path-" + idx + "\" value='");
+			pw.print(xss.encodeForHTMLAttr(StringUtils.defaultString(privilege.getKey())));
+			pw.print("' style='width:100%' />");
+
+			pw.print("</td><td>");
+
+			pw.print("<input type=\"text\" list=\"data-privileges\" name=\"acl-privilege-" + idx + "\" value='");
+			pw.print(xss.encodeForHTMLAttr(StringUtils.defaultString(privilege.getValue())));
+			pw.print("' style='width:100%' />");
+
+			pw.print("</td><td>");
+
+			pw.print("<input type=\"button\" value=\"&nbsp;-&nbsp;\" class=\"repeating-remove\" /></td>");
+		}
+		pw.print("</tr></table>");
+
+		pw.print("<input type=\"button\" value=\"&nbsp;+&nbsp;\" class=\"repeating-add\" />");
+
+		pw.print("<datalist id=\"data-privileges\">");
+		for (String option : supportedPrivileges) {
+			pw.print("<option");
+			pw.print(">");
+			pw.print(xss.encodeForHTMLAttr(option));
+			pw.print("</option>");
+		}
+		pw.print("</datalist><script src=\"/system/console/serviceusers/res/ui/serviceusermanager.js\"></script>");
+		infoDiv(pw, alertMessage);
+		pw.println("</td>");
 	}
 
 	private void printServiceUserDetails(HttpServletRequest request, PrintWriter pw)
@@ -676,44 +703,6 @@ public class ServiceUserWebConsolePlugin extends SimpleWebConsolePlugin {
 		}
 	}
 
-	private List<Pair<String, String>> getPrivileges(HttpServletRequest request) {
-		List<Pair<String, String>> privileges = new ArrayList<Pair<String, String>>();
-		List<String> params = Collections.list(request.getParameterNames());
-
-		for (String param : params) {
-			if (param.startsWith("acl-path-")) {
-				String path = request.getParameter(param);
-				String privilege = request.getParameter(param.replace("-path-", "-privilege-"));
-				if (StringUtils.isNotBlank(path) && StringUtils.isNotBlank(privilege)) {
-					privileges.add(new ImmutablePair<String, String>(path, privilege));
-				} else {
-					log.warn("Unable to load ACL due to missing value {}={}", path, privilege);
-				}
-			}
-		}
-
-		return privileges;
-	}
-
-	private String[] getSupportedPrivileges(HttpServletRequest request) {
-		String[] names = null;
-		try {
-			ResourceResolver resolver = getResourceResolver(request);
-			Session session = resolver.adaptTo(Session.class);
-			AccessControlManager accessControl = session.getAccessControlManager();
-			Privilege[] privileges = accessControl.getSupportedPrivileges("/");
-			names = new String[privileges.length];
-			for (int i = 0; i < privileges.length; i++) {
-				names[i] = privileges[i].getName();
-			}
-			Arrays.sort(names);
-		} catch (RepositoryException re) {
-			log.error("Exception loading Supported Privileges", re);
-		}
-		return names;
-
-	}
-
 	@Override
 	protected void renderContent(HttpServletRequest request, HttpServletResponse response)
 			throws ServletException, IOException {
@@ -743,48 +732,6 @@ public class ServiceUserWebConsolePlugin extends SimpleWebConsolePlugin {
 		} else {
 			info(pw, "Unknown action: " + action);
 		}
-	}
-
-	private void printPrivilegeSelect(PrintWriter pw, String label, List<Pair<String, String>> privileges,
-			String[] supportedPrivileges, String alertMessage) {
-		pw.print("<td style='width:20%'>");
-		pw.print(xss.encodeForHTMLAttr(label));
-		pw.println("</td>");
-		pw.print("<td><table class=\"repeating-container\" style=\"width: 100%\" data-length=\"" + privileges.size()
-				+ "\"><tr><td>Path</td><td>Privilege</td><td></td>");
-
-		int idx = 0;
-		for (Pair<String, String> privilege : privileges) {
-			pw.print("</tr><tr class=\"repeating-item\"><td>");
-
-			pw.print("<input type=\"text\"  name=\"acl-path-" + idx + "\" value='");
-			pw.print(xss.encodeForHTMLAttr(StringUtils.defaultString(privilege.getKey())));
-			pw.print("' style='width:100%' />");
-
-			pw.print("</td><td>");
-
-			pw.print("<input type=\"text\" list=\"data-privileges\" name=\"acl-privilege-" + idx + "\" value='");
-			pw.print(xss.encodeForHTMLAttr(StringUtils.defaultString(privilege.getValue())));
-			pw.print("' style='width:100%' />");
-
-			pw.print("</td><td>");
-
-			pw.print("<input type=\"button\" value=\"&nbsp;-&nbsp;\" class=\"repeating-remove\" /></td>");
-		}
-		pw.print("</tr></table>");
-
-		pw.print("<input type=\"button\" value=\"&nbsp;+&nbsp;\" class=\"repeating-add\" />");
-
-		pw.print("<datalist id=\"data-privileges\">");
-		for (String option : supportedPrivileges) {
-			pw.print("<option");
-			pw.print(">");
-			pw.print(xss.encodeForHTMLAttr(option));
-			pw.print("</option>");
-		}
-		pw.print("</datalist><script src=\"/system/console/serviceusers/res/ui/serviceusermanager.js\"></script>");
-		infoDiv(pw, alertMessage);
-		pw.println("</td>");
 	}
 
 	private void selectField(PrintWriter pw, String label, String fieldName, String value, Collection<String> options,
@@ -900,6 +847,102 @@ public class ServiceUserWebConsolePlugin extends SimpleWebConsolePlugin {
 			infoDiv(pw, alertMessage);
 		}
 		pw.println("</td>");
+	}
+
+	private boolean updatePrivileges(HttpServletRequest request, ResourceResolver resolver) {
+
+		List<Pair<String, String>> privileges = this.getPrivileges(request);
+		String name = getParameter(request, PN_NAME, "");
+
+		List<String> currentPolicies = new ArrayList<String>();
+		findACLs(resolver, name, currentPolicies);
+		for (int i = 0; i < currentPolicies.size(); i++) {
+			String path = StringUtils.substringBefore(currentPolicies.get(i), "/rep:policy");
+			currentPolicies.set(i, StringUtils.isNotBlank(path) ? path : "/");
+		}
+		log.debug("Loaded current policy paths: {}", currentPolicies);
+
+		Map<String, List<String>> toSet = new HashMap<String, List<String>>();
+		for (Pair<String, String> privilege : privileges) {
+			if (!toSet.containsKey(privilege.getKey())) {
+				toSet.put(privilege.getKey(), new ArrayList<String>());
+			}
+			toSet.get(privilege.getKey()).add(privilege.getValue());
+		}
+		log.debug("Loaded updated policy paths: {}", currentPolicies);
+
+		String lastEntry = null;
+
+		try {
+
+			Session session = resolver.adaptTo(Session.class);
+			AccessControlManager accessManager = session.getAccessControlManager();
+			PrincipalManager principalManager = AccessControlUtil.getPrincipalManager(session);
+
+			for (Entry<String, List<String>> pol : toSet.entrySet()) {
+				lastEntry = pol.getKey();
+				currentPolicies.remove(pol.getKey());
+				log.debug("Updating policies for {}", pol.getKey());
+
+				AccessControlPolicy[] policies = accessManager.getPolicies(pol.getKey());
+				List<String> toRemove = new ArrayList<String>();
+				for (AccessControlPolicy p : policies) {
+					if (p instanceof AccessControlList) {
+						AccessControlList policy = (AccessControlList) p;
+						for (AccessControlEntry entry : policy.getAccessControlEntries()) {
+							Principal prin = entry.getPrincipal();
+							if (prin.getName().equals(name)) {
+								for (Privilege privilege : entry.getPrivileges()) {
+									if (!pol.getValue().contains(privilege.getName())) {
+										log.debug("Removing privilege {}", privilege);
+										toRemove.add(privilege.getName());
+									}
+								}
+							}
+						}
+					}
+				}
+				Principal principal = principalManager.getPrincipal(name);
+				AccessControlUtil.replaceAccessControlEntry(session, pol.getKey(), principal,
+						pol.getValue().toArray(new String[pol.getValue().size()]), new String[0],
+						toRemove.toArray(new String[toRemove.size()]), null);
+			}
+			session.save();
+
+			for (String oldPolicy : currentPolicies) {
+				boolean removed = false;
+				log.debug("Removing policy for {}", oldPolicy);
+				AccessControlPolicy[] policies = accessManager.getPolicies(oldPolicy);
+				AccessControlEntry toRemove = null;
+				for (AccessControlPolicy p : policies) {
+					if (p instanceof AccessControlList) {
+						AccessControlList policy = (AccessControlList) p;
+						for (AccessControlEntry entry : policy.getAccessControlEntries()) {
+							Principal prin = entry.getPrincipal();
+							if (prin.getName().equals(name)) {
+								toRemove = entry;
+								break;
+							}
+						}
+						if (toRemove != null) {
+							removed = true;
+							policy.removeAccessControlEntry(toRemove);
+							accessManager.setPolicy(oldPolicy, policy);
+							session.save();
+							log.debug("Removed access control entry {}", toRemove);
+						}
+					}
+				}
+				if (!removed) {
+					log.warn("No policy found for {}", oldPolicy);
+				}
+			}
+		} catch (RepositoryException e) {
+			log.error("Exception updating principals with {}, failed on {}", toSet, lastEntry, e);
+			return false;
+		}
+
+		return true;
 	}
 
 }
