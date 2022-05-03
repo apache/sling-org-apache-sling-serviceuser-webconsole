@@ -1,0 +1,9 @@
+Import-Package:\
+    !java.io,\
+    !java.lang.*,\
+    !java.net,\
+    !java.nio.*,\
+    !java.security,\
+    !java.util,\
+    org.apache.sling.xss;version="[1.0.0,3)",\
+    *
