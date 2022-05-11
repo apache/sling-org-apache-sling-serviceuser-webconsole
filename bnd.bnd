@@ -1,0 +1,4 @@
+Import-Package:\
+    org.apache.sling.xss;version="[1.0.0,3)",\
+    *
+

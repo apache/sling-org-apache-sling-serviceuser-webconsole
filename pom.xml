@@ -14,13 +14,12 @@
 	<modelVersion>4.0.0</modelVersion>
 	<parent>
 		<groupId>org.apache.sling</groupId>
-		<artifactId>sling</artifactId>
-		<version>30</version>
+		<artifactId>sling-bundle-parent</artifactId>
+		<version>47</version>
 		<relativePath />
 	</parent>
 
 	<artifactId>org.apache.sling.serviceuser.webconsole</artifactId>
-	<packaging>bundle</packaging>
 	<version>1.0.3-SNAPSHOT</version>
 
 	<name>Apache Sling Service User Web Console</name>
@@ -35,22 +34,16 @@
 		<tag>HEAD</tag>
 	</scm>
 
+	<properties>
+		<sling.java.version>8</sling.java.version>
+		<project.build.outputTimestamp>1</project.build.outputTimestamp>
+	</properties>
+
 	<build>
 		<plugins>
 			<plugin>
-				<groupId>org.apache.felix</groupId>
-				<artifactId>maven-bundle-plugin</artifactId>
-				<extensions>true</extensions>
-				<configuration>
-					<instructions>
-						<Import-Package>
-							<!-- Support XSS API 1.x and 2.x - we use only classes from the API 
-								with same signature in both versions -->
-							org.apache.sling.xss;version="[1.0.0,3)",
-							*
-						</Import-Package>
-					</instructions>
-				</configuration>
+				<groupId>biz.aQute.bnd</groupId>
+				<artifactId>bnd-maven-plugin</artifactId>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
@@ -113,8 +106,12 @@
 		</dependency>
 		<dependency>
 			<groupId>org.osgi</groupId>
-			<artifactId>org.osgi.compendium</artifactId>
-			<version>4.2.0</version>
+			<artifactId>org.osgi.service.component</artifactId>
+			<scope>provided</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.osgi</groupId>
+			<artifactId>org.osgi.service.component.annotations</artifactId>
 			<scope>provided</scope>
 		</dependency>
 		<dependency>
@@ -153,8 +150,8 @@
 		</dependency>
 		<dependency>
 			<groupId>org.mockito</groupId>
-			<artifactId>mockito-all</artifactId>
-			<version>1.9.5</version>
+			<artifactId>mockito-core</artifactId>
+			<version>4.5.1</version>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
