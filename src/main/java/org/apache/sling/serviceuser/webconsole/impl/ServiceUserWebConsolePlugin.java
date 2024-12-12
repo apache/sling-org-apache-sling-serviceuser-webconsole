@@ -18,6 +18,20 @@
  */
 package org.apache.sling.serviceuser.webconsole.impl;
 
+import javax.jcr.RepositoryException;
+import javax.jcr.Session;
+import javax.jcr.nodetype.NodeType;
+import javax.jcr.query.Query;
+import javax.jcr.security.AccessControlEntry;
+import javax.jcr.security.AccessControlList;
+import javax.jcr.security.AccessControlManager;
+import javax.jcr.security.AccessControlPolicy;
+import javax.jcr.security.Privilege;
+import javax.servlet.Servlet;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.reflect.Array;
@@ -35,20 +49,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-
-import javax.jcr.RepositoryException;
-import javax.jcr.Session;
-import javax.jcr.nodetype.NodeType;
-import javax.jcr.query.Query;
-import javax.jcr.security.AccessControlEntry;
-import javax.jcr.security.AccessControlList;
-import javax.jcr.security.AccessControlManager;
-import javax.jcr.security.AccessControlPolicy;
-import javax.jcr.security.Privilege;
-import javax.servlet.Servlet;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.ObjectUtils;
@@ -89,11 +89,14 @@ import org.slf4j.LoggerFactory;
 /**
  * Web console plugin to test configuration resolution.
  */
-@Component(service = Servlet.class, property = {
-        Constants.SERVICE_DESCRIPTION + "=Apache Sling Service User Manager Web Console Plugin",
-        WebConsoleConstants.PLUGIN_LABEL + "=" + ServiceUserWebConsolePlugin.LABEL,
-        WebConsoleConstants.PLUGIN_TITLE + "=" + ServiceUserWebConsolePlugin.TITLE,
-        WebConsoleConstants.PLUGIN_CATEGORY + "=Sling" })
+@Component(
+        service = Servlet.class,
+        property = {
+            Constants.SERVICE_DESCRIPTION + "=Apache Sling Service User Manager Web Console Plugin",
+            WebConsoleConstants.PLUGIN_LABEL + "=" + ServiceUserWebConsolePlugin.LABEL,
+            WebConsoleConstants.PLUGIN_TITLE + "=" + ServiceUserWebConsolePlugin.TITLE,
+            WebConsoleConstants.PLUGIN_CATEGORY + "=Sling"
+        })
 @SuppressWarnings("serial")
 public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
 
@@ -102,7 +105,8 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
     private static final String TR = "</tr>";
     private static final String STYLE_WIDTH_100 = "' style='width:100%' />";
     private static final String TD_STYLE_WIDTH_20 = "<td style='width:20%'>";
-    public static final String COMPONENT_NAME = "org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl.amended";
+    public static final String COMPONENT_NAME =
+            "org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl.amended";
     public static final String LABEL = "serviceusers";
     public static final String TITLE = "Service Users";
 
@@ -132,8 +136,10 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
 
         String appPath = getParameter(request, PN_APP_PATH, "");
 
-        Iterator<Resource> configs = resolver.findResources("SELECT * FROM [sling:OsgiConfig] WHERE ISDESCENDANTNODE(["
-                + appPath + "]) AND NAME() LIKE '" + COMPONENT_NAME + "%'", Query.JCR_SQL2);
+        Iterator<Resource> configs = resolver.findResources(
+                "SELECT * FROM [sling:OsgiConfig] WHERE ISDESCENDANTNODE([" + appPath + "]) AND NAME() LIKE '"
+                        + COMPONENT_NAME + "%'",
+                Query.JCR_SQL2);
 
         try {
             boolean dirty = false;
@@ -143,13 +149,16 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                 config = configs.next();
                 log.debug("Using existing configuration {}", config);
             } else {
-                String path = appPath + "/config/" + COMPONENT_NAME + "-"
-                        + appPath.substring(appPath.lastIndexOf('/') + 1);
+                String path =
+                        appPath + "/config/" + COMPONENT_NAME + "-" + appPath.substring(appPath.lastIndexOf('/') + 1);
                 log.debug("Creating new configuration {}", path);
 
-                config = ResourceUtil.getOrCreateResource(resolver, path,
+                config = ResourceUtil.getOrCreateResource(
+                        resolver,
+                        path,
                         Collections.singletonMap(JcrConstants.JCR_PRIMARYTYPE, (Object) "sling:OsgiConfig"),
-                        NodeType.NT_FOLDER, false);
+                        NodeType.NT_FOLDER,
+                        false);
                 dirty = true;
             }
 
@@ -214,7 +223,6 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                 resolver.close();
             }
         }
-
     }
 
     private void processRequest(HttpServletRequest request, HttpServletResponse response, ResourceResolver resolver)
@@ -235,8 +243,8 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                     params.add(PN_USER + "="
                             + URLEncoder.encode(userResource.getName(), StandardCharsets.UTF_8.toString()));
 
-                    WebConsoleUtil.sendRedirect(request, response,
-                            "/system/console/" + LABEL + "?" + StringUtils.join(params, "&"));
+                    WebConsoleUtil.sendRedirect(
+                            request, response, "/system/console/" + LABEL + "?" + StringUtils.join(params, "&"));
                 } else {
                     sendErrorRedirect(request, response, "Unable to update service user permissions!");
                 }
@@ -270,8 +278,9 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
             Resource aclResource = aclResources.next();
             affectedPaths.add(aclResource.getPath());
             ValueMap properties = aclResource.adaptTo(ValueMap.class);
-            String acl = aclResource.getPath().substring(0, aclResource.getPath().indexOf("/rep:policy")) + "="
-                    + StringUtils.join(properties.get("rep:privileges", String[].class), ",");
+            String acl =
+                    aclResource.getPath().substring(0, aclResource.getPath().indexOf("/rep:policy")) + "="
+                            + StringUtils.join(properties.get("rep:privileges", String[].class), ",");
             acls.add(acl);
         }
         return acls.toArray(new String[acls.size()]);
@@ -440,7 +449,8 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
      */
     protected URL getResource(String path) {
         String base = "/" + LABEL + "/";
-        return (path != null && path.startsWith(base)) ? getClass().getResource(path.substring(base.length() - 1))
+        return (path != null && path.startsWith(base))
+                ? getClass().getResource(path.substring(base.length() - 1))
                 : null;
     }
 
@@ -517,7 +527,9 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
             @Override
             public int compare(Pair<String, Mapping> o1, Pair<String, Mapping> o2) {
                 if (o1.getKey().equals(o2.getKey())) {
-                    return o1.getValue().getServiceName().compareTo(o2.getValue().getServiceName());
+                    return o1.getValue()
+                            .getServiceName()
+                            .compareTo(o2.getValue().getServiceName());
                 } else {
                     return o1.getKey().compareTo(o2.getKey());
                 }
@@ -541,16 +553,22 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
             } else {
                 bundleContext.getBundle();
                 pw.println("<td>" + xss.encodeForHTML(mapping.getValue().getServiceName()) + TD);
-                pw.println("<td>" + xss.encodeForHTML(
-                        mapping.getValue().getSubServiceName() != null ? mapping.getValue().getSubServiceName() : "")
+                pw.println("<td>"
+                        + xss.encodeForHTML(
+                                mapping.getValue().getSubServiceName() != null
+                                        ? mapping.getValue().getSubServiceName()
+                                        : "")
                         + TD);
             }
         }
-
     }
 
-    private void printPrivilegeSelect(PrintWriter pw, String label, List<Pair<String, String>> privileges,
-            String[] supportedPrivileges, String alertMessage) {
+    private void printPrivilegeSelect(
+            PrintWriter pw,
+            String label,
+            List<Pair<String, String>> privileges,
+            String[] supportedPrivileges,
+            String alertMessage) {
         pw.print(TD_STYLE_WIDTH_20);
         pw.print(xss.encodeForHTMLAttr(label));
         pw.println(TD);
@@ -688,29 +706,46 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
 
         tableRows(pw);
         String userContextPath = getParameter(request, PN_USER_PATH, "");
-        textField(pw, "Intermediate Path", PN_USER_PATH, userContextPath,
+        textField(
+                pw,
+                "Intermediate Path",
+                PN_USER_PATH,
+                userContextPath,
                 "Optional: The intermediate path under which to create the user. Should start with system, e.g. system/myapp");
 
         tableRows(pw);
         String bundle = getParameter(request, PN_BUNDLE, "");
-        selectField(pw, "Bundle", PN_BUNDLE, bundle, getBundles(),
+        selectField(
+                pw,
+                "Bundle",
+                PN_BUNDLE,
+                bundle,
+                getBundles(),
                 "The bundle from which this service user will be useable");
 
         tableRows(pw);
         String serviceName = getParameter(request, PN_SUB_SERVICE, "");
-        textField(pw, "Sub Service Name", PN_SUB_SERVICE, serviceName,
+        textField(
+                pw,
+                "Sub Service Name",
+                PN_SUB_SERVICE,
+                serviceName,
                 "Optional: Allows for different permissions for different services within a bundle");
 
         tableRows(pw);
         String appPath = getParameter(request, PN_APP_PATH, "");
-        textField(pw, "Application Path", PN_APP_PATH, appPath,
+        textField(
+                pw,
+                "Application Path",
+                PN_APP_PATH,
+                appPath,
                 "The application under which to create the OSGi Configuration for the Service User Mapping, e.g. /apps/myapp");
 
         tableRows(pw);
 
         List<Pair<String, String>> privileges = getPrivileges(request);
-        printPrivilegeSelect(pw, "ACLs", privileges, getSupportedPrivileges(request),
-                "Set the privileges for this service user");
+        printPrivilegeSelect(
+                pw, "ACLs", privileges, getSupportedPrivileges(request), "Set the privileges for this service user");
 
         tableRows(pw);
 
@@ -751,7 +786,9 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
         String action = getParameter(request, PN_ACTION, "");
         if (StringUtils.isBlank(action)) {
             log.debug("Rendering service users page");
-            info(pw, "Service users are used by OSGi Services to access the Sling repository. Use this form to find and create service users.");
+            info(
+                    pw,
+                    "Service users are used by OSGi Services to access the Sling repository. Use this form to find and create service users.");
 
             try {
                 printServiceUsers(request, pw);
@@ -772,7 +809,12 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
         }
     }
 
-    private void selectField(PrintWriter pw, String label, String fieldName, String value, Collection<String> options,
+    private void selectField(
+            PrintWriter pw,
+            String label,
+            String fieldName,
+            String value,
+            Collection<String> options,
             String... alertMessages) {
         pw.print(TD_STYLE_WIDTH_20);
         pw.print(xss.encodeForHTMLAttr(label));
@@ -799,7 +841,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
     private void sendErrorRedirect(HttpServletRequest request, HttpServletResponse response, String alert)
             throws IOException {
         List<String> params = new ArrayList<>();
-        for (String param : new String[] { PN_APP_PATH, PN_BUNDLE, PN_NAME, PN_SUB_SERVICE, PN_USER_PATH }) {
+        for (String param : new String[] {PN_APP_PATH, PN_BUNDLE, PN_NAME, PN_SUB_SERVICE, PN_USER_PATH}) {
             params.add(param + "="
                     + URLEncoder.encode(this.getParameter(request, param, ""), StandardCharsets.UTF_8.toString()));
         }
@@ -817,8 +859,8 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
             params.add(PN_ALERT + "=" + URLEncoder.encode(alert, "UTF-8"));
         }
 
-        WebConsoleUtil.sendRedirect(request, response,
-                "/system/console/" + LABEL + "?" + StringUtils.join(params, "&"));
+        WebConsoleUtil.sendRedirect(
+                request, response, "/system/console/" + LABEL + "?" + StringUtils.join(params, "&"));
     }
 
     private void tableEnd(PrintWriter pw) {
@@ -860,7 +902,8 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
             if (value.getClass().isArray()) {
                 for (int i = 0; i < Array.getLength(value); i++) {
                     Object itemValue = Array.get(value, i);
-                    pw.print(xss.encodeForHTML(ObjectUtils.defaultIfNull(itemValue, "").toString()));
+                    pw.print(xss.encodeForHTML(
+                            ObjectUtils.defaultIfNull(itemValue, "").toString()));
                     pw.println("<br>");
                 }
             } else {
@@ -943,9 +986,14 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                     }
                 }
                 Principal principal = principalManager.getPrincipal(name);
-                AccessControlUtil.replaceAccessControlEntry(session, pol.getKey(), principal,
-                        pol.getValue().toArray(new String[pol.getValue().size()]), new String[0],
-                        toRemove.toArray(new String[toRemove.size()]), null);
+                AccessControlUtil.replaceAccessControlEntry(
+                        session,
+                        pol.getKey(),
+                        principal,
+                        pol.getValue().toArray(new String[pol.getValue().size()]),
+                        new String[0],
+                        toRemove.toArray(new String[toRemove.size()]),
+                        null);
             }
             session.save();
 
@@ -984,5 +1032,4 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
 
         return true;
     }
-
 }
