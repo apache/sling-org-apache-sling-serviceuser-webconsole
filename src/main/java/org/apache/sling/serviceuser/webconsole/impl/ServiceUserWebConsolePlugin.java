@@ -21,6 +21,7 @@ package org.apache.sling.serviceuser.webconsole.impl;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 import javax.jcr.nodetype.NodeType;
+import javax.jcr.nodetype.NodeTypeManager;
 import javax.jcr.query.Query;
 import javax.jcr.security.AccessControlEntry;
 import javax.jcr.security.AccessControlList;
@@ -75,6 +76,8 @@ import org.apache.sling.jcr.base.util.AccessControlUtil;
 import org.apache.sling.serviceusermapping.Mapping;
 import org.apache.sling.serviceusermapping.ServiceUserMapper;
 import org.apache.sling.xss.XSSAPI;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
@@ -295,18 +298,44 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
         return bundles.get(symbolicName);
     }
 
+    /**
+     * Helper to check if the specified node type has been registered
+     *
+     * @param resolver the resolver to check
+     * @param typeName the node type name to check
+     * @return true if the node type exists, false otherwise
+     */
+    private boolean hasRegisteredNodeType(@NotNull ResourceResolver resolver, @NotNull String typeName) {
+        boolean hasNodeType = false;
+        final @Nullable Session jcrSession = resolver.adaptTo(Session.class);
+        if (jcrSession != null) {
+            try {
+                final NodeTypeManager nodeTypeManager =
+                        jcrSession.getWorkspace().getNodeTypeManager();
+                hasNodeType = nodeTypeManager.hasNodeType(typeName);
+            } catch (RepositoryException e) {
+                log.warn("Unable to detemine if node type is registered", e);
+            }
+        }
+        return hasNodeType;
+    }
+
     private Object findConfigurations(ResourceResolver resolver, String name, List<String> affectedPaths) {
         List<String> configurations = new ArrayList<>();
 
-        Iterator<Resource> configResources = resolver.findResources(
-                "SELECT * FROM [sling:OsgiConfig] AS s WHERE (ISDESCENDANTNODE([/apps]) OR ISDESCENDANTNODE([/libs])) AND NAME(s) LIKE 'org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl.amended%' AND [user.mapping] LIKE '%="
-                        + name + "'",
-                Query.JCR_SQL2);
-        while (configResources.hasNext()) {
-            Resource configResource = configResources.next();
-            affectedPaths.add(configResource.getPath());
-            configurations.add(configResource.getPath());
+        Iterator<Resource> configResources;
+        if (hasRegisteredNodeType(resolver, "sling:OsgiConfig")) {
+            configResources = resolver.findResources(
+                    "SELECT * FROM [sling:OsgiConfig] AS s WHERE (ISDESCENDANTNODE([/apps]) OR ISDESCENDANTNODE([/libs])) AND NAME(s) LIKE 'org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl.amended%' AND [user.mapping] LIKE '%="
+                            + name + "'",
+                    Query.JCR_SQL2);
+            while (configResources.hasNext()) {
+                Resource configResource = configResources.next();
+                affectedPaths.add(configResource.getPath());
+                configurations.add(configResource.getPath());
+            }
         }
+
         configResources = resolver.findResources(
                 "SELECT * FROM [nt:file] AS s WHERE (ISDESCENDANTNODE([/apps]) OR ISDESCENDANTNODE([/libs])) AND NAME(s) LIKE 'org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl.amended%' AND [jcr:content/jcr:data] LIKE '%="
                         + name + "%'",
