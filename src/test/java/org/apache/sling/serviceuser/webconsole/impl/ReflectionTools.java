@@ -47,14 +47,10 @@ public class ReflectionTools {
             } while (field == null && clazz != null);
             if (field != null) {
                 if (Modifier.isStatic(field.getModifiers())) {
-                    // if (!field.canAccess(null)) { // TODO: uncomment for java 11+
                     field.setAccessible(true);
-                    // }
                     result = field.get(null);
                 } else {
-                    // if (!field.canAccess(obj)) { // TODO: uncomment for java 11+
                     field.setAccessible(true);
-                    // }
                     result = field.get(obj);
                 }
             } else {
@@ -79,14 +75,10 @@ public class ReflectionTools {
             } while (field == null && clazz != null);
             if (field != null) {
                 if (Modifier.isStatic(field.getModifiers())) {
-                    // if (!field.canAccess(null)) { // TODO: uncomment for java 11+
                     field.setAccessible(true);
-                    // }
                     field.set(null, value);
                 } else {
-                    // if (!field.canAccess(obj)) { // TODO: uncomment for java 11+
                     field.setAccessible(true);
-                    // }
                     field.set(obj, value);
                 }
             } else {

@@ -19,7 +19,6 @@
 package org.apache.sling.serviceuser.webconsole.impl;
 
 import javax.jcr.Node;
-import javax.jcr.PathNotFoundException;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 import javax.jcr.nodetype.NodeType;
@@ -81,6 +80,7 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
+import org.mockito.invocation.InvocationOnMock;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
@@ -117,7 +117,7 @@ class ServiceUserWebConsolePluginTest {
     }
 
     @BeforeEach
-    protected void beforeEach() {
+    void beforeEach() {
         context.registerInjectActivateService(ServiceUserMapperImpl.class);
         plugin = context.registerInjectActivateService(ServiceUserWebConsolePlugin.class);
     }
@@ -236,11 +236,8 @@ class ServiceUserWebConsolePluginTest {
 
         // NOTE: replace the replaceAccessControlEntry method with one that does nothing since we are not
         //  testing that functionality here and it doesn't work with the partially mocked acm.
-        try (MockedStatic<AccessControlUtil> subjectMock =
-                Mockito.mockStatic(AccessControlUtil.class, withSettings().defaultAnswer(invocation -> {
-                    // for all other methods call the original
-                    return invocation.callRealMethod();
-                })); ) {
+        try (MockedStatic<AccessControlUtil> subjectMock = Mockito.mockStatic(
+                AccessControlUtil.class, withSettings().defaultAnswer(InvocationOnMock::callRealMethod)); ) {
             subjectMock
                     .when(() -> AccessControlUtil.replaceAccessControlEntry(
                             any(Session.class),
@@ -415,7 +412,7 @@ class ServiceUserWebConsolePluginTest {
     }
 
     @Test
-    void testDoPostWithIOExceptionDuringErrorRedirect() throws LoginException, ServletException, IOException {
+    void testDoPostWithIOExceptionDuringErrorRedirect() throws LoginException {
         final @NotNull MockSlingHttpServletRequest request = context.request();
 
         mockResolverFactoryThrowsLoginException();
@@ -514,17 +511,15 @@ class ServiceUserWebConsolePluginTest {
      */
     @ParameterizedTest
     @NullAndEmptySource
-    void testRenderContentForServiceUsers(String action)
-            throws ServletException, IOException, PathNotFoundException, RepositoryException {
+    void testRenderContentForServiceUsers(String action) throws ServletException, IOException, RepositoryException {
 
         final @NotNull BundleContext bundleContext = context.bundleContext();
 
         // provide some data to print in the output
-        mockMappingConfigAmendment(bundleContext, bundleContext.getBundle().getSymbolicName(), null, "serviceuser2", 3);
-        mockMappingConfigAmendment(
-                bundleContext, bundleContext.getBundle().getSymbolicName(), "subservice1", "serviceuser2", 1);
-        mockMappingConfigAmendment(bundleContext, "another.bundle1", "subservice1", "serviceuser2", 2);
-        mockMappingConfigAmendment(bundleContext, "another.bundle1", null, "serviceuser2", 4);
+        mockMappingConfigAmendment(bundleContext.getBundle().getSymbolicName(), null, "serviceuser2", 3);
+        mockMappingConfigAmendment(bundleContext.getBundle().getSymbolicName(), "subservice1", "serviceuser2", 1);
+        mockMappingConfigAmendment("another.bundle1", "subservice1", "serviceuser2", 2);
+        mockMappingConfigAmendment("another.bundle1", null, "serviceuser2", 4);
         // NOTE: the MockBundle doesn't have a Bundle-Name header, so supply one
         ((MockBundle) bundleContext.getBundle())
                 .setHeaders(Collections.singletonMap(Constants.BUNDLE_NAME, "Mock Bundle"));
@@ -565,7 +560,7 @@ class ServiceUserWebConsolePluginTest {
 
     @Test
     void testRenderContentForServiceUsersWithCaughtLoginException()
-            throws ServletException, IOException, PathNotFoundException, RepositoryException, LoginException {
+            throws ServletException, IOException, LoginException {
         final @NotNull MockSlingHttpServletRequest request = context.request();
         Map<String, Object> params = new HashMap<>();
         request.setParameterMap(params);
@@ -589,22 +584,16 @@ class ServiceUserWebConsolePluginTest {
     @ParameterizedTest
     @MethodSource("testRenderContentForServiceUserDetailsArgs")
     void testRenderContentForServiceUserDetails(Set<TestConfigOptions> options)
-            throws ServletException, IOException, PathNotFoundException, RepositoryException, LoginException {
+            throws ServletException, IOException, RepositoryException, LoginException {
         final @NotNull BundleContext bundleContext = context.bundleContext();
 
         // provide some mapping data to print in the output
         mockMappingConfigAmendment(
-                bundleContext,
-                bundleContext.getBundle().getSymbolicName(),
-                null,
-                null,
-                Arrays.asList("myserviceuser1"),
-                3);
+                bundleContext.getBundle().getSymbolicName(), null, null, Arrays.asList("myserviceuser1"), 3);
+        mockMappingConfigAmendment(bundleContext.getBundle().getSymbolicName(), "subservice1", "myserviceuser1", 1);
         mockMappingConfigAmendment(
-                bundleContext, bundleContext.getBundle().getSymbolicName(), "subservice1", "myserviceuser1", 1);
-        mockMappingConfigAmendment(
-                bundleContext, "another.bundle1", "subservice2", null, Arrays.asList("otheruser1", "otheruser2"), 2);
-        mockMappingConfigAmendment(bundleContext, "another.bundle2", "subservice3", "otheruser3", 5);
+                "another.bundle1", "subservice2", null, Arrays.asList("otheruser1", "otheruser2"), 2);
+        mockMappingConfigAmendment("another.bundle2", "subservice3", "otheruser3", 5);
 
         final @NotNull MockSlingHttpServletRequest request = context.request();
 
@@ -676,7 +665,7 @@ class ServiceUserWebConsolePluginTest {
 
     @Test
     void testRenderContentForServiceUserDetailsWithCaughtLoginException()
-            throws ServletException, IOException, PathNotFoundException, RepositoryException, LoginException {
+            throws ServletException, IOException, LoginException {
         final @NotNull MockSlingHttpServletRequest request = context.request();
         Map<String, Object> params = new HashMap<>();
         params.put(ServiceUserWebConsolePlugin.PN_ACTION, "details");
@@ -720,12 +709,8 @@ class ServiceUserWebConsolePluginTest {
      * @param serviceRanking the ranking value of the registered service
      */
     private void mockMappingConfigAmendment(
-            @NotNull BundleContext bundleContext,
-            @NotNull String bundle,
-            @Nullable String subService,
-            @NotNull String name,
-            long serviceRanking) {
-        mockMappingConfigAmendment(bundleContext, bundle, subService, name, Collections.emptyList(), serviceRanking);
+            @NotNull String bundle, @Nullable String subService, @NotNull String name, long serviceRanking) {
+        mockMappingConfigAmendment(bundle, subService, name, Collections.emptyList(), serviceRanking);
     }
 
     /**
@@ -739,7 +724,6 @@ class ServiceUserWebConsolePluginTest {
      * @param serviceRanking the ranking value of the registered service
      */
     private void mockMappingConfigAmendment(
-            @NotNull BundleContext bundleContext,
             @NotNull String bundle,
             @Nullable String subService,
             @Nullable String name,
