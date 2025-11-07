@@ -85,6 +85,7 @@ import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -411,7 +412,7 @@ class ServiceUserWebConsolePluginTest {
     }
 
     @Test
-    void testDoPostWithIOExceptionDuringErrorRedirect() throws LoginException, ServletException, IOException {
+    void testDoPostWithIOExceptionDuringErrorRedirect() throws LoginException {
         final @NotNull MockSlingHttpServletRequest request = context.request();
 
         mockResolverFactoryThrowsLoginException();
@@ -425,9 +426,7 @@ class ServiceUserWebConsolePluginTest {
         final @NotNull MockSlingHttpServletResponse response = Mockito.spy(context.response());
         Mockito.doThrow(IOException.class).when(response).sendRedirect(anyString());
 
-        plugin.doPost(request, response);
-        assertEquals(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, response.getStatus());
-        assertEquals("Failed to send error redirect", response.getStatusMessage());
+        assertDoesNotThrow(() -> plugin.doPost(request, response));
     }
 
     protected static Stream<Arguments> testDoPostWithMissingParametersArgs() {

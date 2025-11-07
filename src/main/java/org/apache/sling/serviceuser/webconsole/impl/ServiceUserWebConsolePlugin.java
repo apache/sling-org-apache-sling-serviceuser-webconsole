@@ -225,7 +225,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
             try {
                 sendErrorRedirect(request, response, "Unexpected exception: " + e);
             } catch (IOException e2) {
-                response.sendError(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, "Failed to send error redirect");
+                log.warn("Failed to send error redirect", e2);
             }
         } finally {
             if (needsAdministrativeResolver(request) && resolver != null) {
