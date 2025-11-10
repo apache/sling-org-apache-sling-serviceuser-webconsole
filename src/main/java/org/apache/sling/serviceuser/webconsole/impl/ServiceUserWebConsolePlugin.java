@@ -43,7 +43,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -82,7 +81,6 @@ import org.osgi.service.component.ComponentContext;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
-import org.osgi.service.component.annotations.ReferencePolicyOption;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -121,24 +119,35 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceUserWebConsolePlugin.class);
 
-    private BundleContext bundleContext;
+    private final BundleContext bundleContext;
 
-    @Reference(policyOption = ReferencePolicyOption.GREEDY)
-    private XSSAPI xss;
+    private final XSSAPI xss;
 
-    @Reference(policyOption = ReferencePolicyOption.GREEDY)
-    private ResourceResolverFactory resolverFactory;
+    private final ResourceResolverFactory resolverFactory;
 
-    @Reference
-    private ServiceUserMapper mapper;
+    private final ServiceUserMapper mapper;
+
+    @Activate
+    public ServiceUserWebConsolePlugin(
+            ComponentContext context,
+            @Reference XSSAPI xss,
+            @Reference ResourceResolverFactory resolverFactory,
+            @Reference ServiceUserMapper mapper) {
+        super();
+        this.bundleContext = context.getBundleContext();
+        this.xss = xss;
+        this.resolverFactory = resolverFactory;
+        this.mapper = mapper;
+    }
 
     private boolean createOrUpdateMapping(HttpServletRequest request, ResourceResolver resolver) {
 
         String appPath = getParameter(request, PN_APP_PATH, "");
 
+        String instanceIdentifier = appPath.substring(appPath.lastIndexOf('/') + 1);
+        String pid = String.format("%s~%s", COMPONENT_NAME, instanceIdentifier);
         Iterator<Resource> configs = resolver.findResources(
-                "SELECT * FROM [sling:OsgiConfig] WHERE ISDESCENDANTNODE([" + appPath + "]) AND NAME() LIKE '"
-                        + COMPONENT_NAME + "%'",
+                "SELECT * FROM [sling:OsgiConfig] WHERE ISDESCENDANTNODE([" + appPath + "]) AND NAME() = '" + pid + "'",
                 Query.JCR_SQL2);
 
         try {
@@ -216,7 +225,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
             try {
                 sendErrorRedirect(request, response, "Unexpected exception: " + e);
             } catch (IOException e2) {
-                throw new IOException("Failed to send error response", e2);
+                log.warn("Failed to send error redirect", e2);
             }
         } finally {
             if (needsAdministrativeResolver(request) && resolver != null) {
@@ -236,12 +245,12 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                 if (updatePrivileges(request, resolver)) {
                     List<String> params = new ArrayList<>();
                     params.add(PN_ACTION + "=" + "details");
+                    String name = userResource.getValueMap().get("rep:principalName", String.class);
                     params.add(PN_ALERT + "="
                             + URLEncoder.encode(
-                                    "Service user " + userResource.getName() + " created / updated successfully!",
+                                    "Service user " + name + " created / updated successfully!",
                                     StandardCharsets.UTF_8.toString()));
-                    params.add(PN_USER + "="
-                            + URLEncoder.encode(userResource.getName(), StandardCharsets.UTF_8.toString()));
+                    params.add(PN_USER + "=" + URLEncoder.encode(name, StandardCharsets.UTF_8.toString()));
 
                     WebConsoleUtil.sendRedirect(
                             request, response, "/system/console/" + LABEL + "?" + StringUtils.join(params, "&"));
@@ -358,18 +367,16 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                 return resolver.getResource(user.getPath());
             } else {
 
-                final String userPath = getParameter(request, PN_USER_PATH, "system");
+                // NOTE: use null as the default instead of "system" to allow the UserManager
+                //  default location to be applied when the user has not specified a value
+                final String intermediatePath = getParameter(request, PN_USER_PATH, null);
 
-                log.debug("Creating new user with name {} and intermediate path {}", name, userPath);
+                log.debug("Creating new user with name {} and intermediate path {}", name, intermediatePath);
 
-                User user = userManager.createSystemUser(name, userPath);
+                User user = userManager.createSystemUser(name, intermediatePath);
                 session.save();
 
-                String path = "/home/users/" + userPath + "/" + name;
-                log.debug("Moving {} to {}", user.getPath(), path);
-                session.getWorkspace().move(user.getPath(), path);
-                session.save();
-
+                String path = user.getPath();
                 return resolver.getResource(path);
             }
         } catch (RepositoryException e) {
@@ -400,7 +407,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                 String path = request.getParameter(param);
                 String privilege = request.getParameter(param.replace("-path-", "-privilege-"));
                 if (StringUtils.isNotBlank(path) && StringUtils.isNotBlank(privilege)) {
-                    privileges.add(new ImmutablePair<String, String>(path, privilege));
+                    privileges.add(new ImmutablePair<>(path, privilege));
                 } else {
                     log.warn("Unable to load ACL due to missing value {}={}", path, privilege);
                 }
@@ -511,55 +518,42 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
         pw.println("</div>");
     }
 
-    @Activate
-    protected void init(ComponentContext context) {
-        this.bundleContext = context.getBundleContext();
-    }
-
     private void printPrincipals(List<Mapping> activeMappings, PrintWriter pw) {
         List<Pair<String, Mapping>> mappings = new ArrayList<>();
         for (Mapping mapping : activeMappings) {
             for (String principal : extractPrincipals(mapping)) {
-                mappings.add(new ImmutablePair<String, Mapping>(principal, mapping));
+                mappings.add(new ImmutablePair<>(principal, mapping));
             }
         }
-        Collections.sort(mappings, new Comparator<Pair<String, Mapping>>() {
-            @Override
-            public int compare(Pair<String, Mapping> o1, Pair<String, Mapping> o2) {
-                if (o1.getKey().equals(o2.getKey())) {
-                    return o1.getValue()
-                            .getServiceName()
-                            .compareTo(o2.getValue().getServiceName());
-                } else {
-                    return o1.getKey().compareTo(o2.getKey());
-                }
+        Collections.sort(mappings, (o1, o2) -> {
+            if (o1.getKey().equals(o2.getKey())) {
+                return o1.getValue().getServiceName().compareTo(o2.getValue().getServiceName());
+            } else {
+                return o1.getKey().compareTo(o2.getKey());
             }
         });
 
+        Map<String, Bundle> bundles = new HashMap<>();
         for (Pair<String, Mapping> mapping : mappings) {
             tableRows(pw);
             pw.println("<td><a href=\"/system/console/serviceusers?action=details&amp;user="
                     + xss.encodeForHTML(mapping.getKey()) + "\">" + xss.encodeForHTML(mapping.getKey()) + "</a></td>");
 
-            Map<String, Bundle> bundles = new HashMap<>();
             Bundle bundle = findBundle(mapping.getValue().getServiceName(), bundles);
             if (bundle != null) {
-                bundleContext.getBundle();
                 pw.println("<td><a href=\"/system/console/bundles/" + bundle.getBundleId() + "\">"
                         + xss.encodeForHTML(
                                 bundle.getHeaders().get(Constants.BUNDLE_NAME) + " (" + bundle.getSymbolicName())
                         + ")</a></td>");
-                pw.println("<td>" + xss.encodeForHTML(mapping.getValue().getSubServiceName()) + TD);
             } else {
-                bundleContext.getBundle();
                 pw.println("<td>" + xss.encodeForHTML(mapping.getValue().getServiceName()) + TD);
-                pw.println("<td>"
-                        + xss.encodeForHTML(
-                                mapping.getValue().getSubServiceName() != null
-                                        ? mapping.getValue().getSubServiceName()
-                                        : "")
-                        + TD);
             }
+            pw.println("<td>"
+                    + xss.encodeForHTML(
+                            mapping.getValue().getSubServiceName() != null
+                                    ? mapping.getValue().getSubServiceName()
+                                    : "")
+                    + TD);
         }
     }
 
@@ -855,9 +849,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
             idx++;
         }
 
-        if (StringUtils.isNotBlank(alert)) {
-            params.add(PN_ALERT + "=" + URLEncoder.encode(alert, "UTF-8"));
-        }
+        params.add(PN_ALERT + "=" + URLEncoder.encode(alert, StandardCharsets.UTF_8.toString()));
 
         WebConsoleUtil.sendRedirect(
                 request, response, "/system/console/" + LABEL + "?" + StringUtils.join(params, "&"));
@@ -947,10 +939,8 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
 
         Map<String, List<String>> toSet = new HashMap<>();
         for (Pair<String, String> privilege : privileges) {
-            if (!toSet.containsKey(privilege.getKey())) {
-                toSet.put(privilege.getKey(), new ArrayList<String>());
-            }
-            toSet.get(privilege.getKey()).add(privilege.getValue());
+            List<String> list = toSet.computeIfAbsent(privilege.getKey(), k -> new ArrayList<>());
+            list.add(privilege.getValue());
         }
         log.debug("Loaded updated policy paths: {}", currentPolicies);
 
@@ -1005,13 +995,10 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                 for (AccessControlPolicy p : policies) {
                     if (p instanceof AccessControlList) {
                         AccessControlList policy = (AccessControlList) p;
-                        for (AccessControlEntry entry : policy.getAccessControlEntries()) {
-                            Principal prin = entry.getPrincipal();
-                            if (prin.getName().equals(name)) {
-                                toRemove = entry;
-                                break;
-                            }
-                        }
+                        toRemove = Arrays.stream(policy.getAccessControlEntries())
+                                .filter(entry -> entry.getPrincipal().getName().equals(name))
+                                .findFirst()
+                                .orElse(null);
                         if (toRemove != null) {
                             removed = true;
                             policy.removeAccessControlEntry(toRemove);
