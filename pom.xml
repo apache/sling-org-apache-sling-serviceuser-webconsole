@@ -35,7 +35,7 @@
     <properties>
         <sling.java.version>8</sling.java.version>
         <project.build.outputTimestamp>1734086735</project.build.outputTimestamp>
-        <jackrabbit.version>2.20.6</jackrabbit.version>
+        <jackrabbit.version>2.22.2</jackrabbit.version>
         <oak.version>1.44.0</oak.version>
     </properties>
     <dependencies>
