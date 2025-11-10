@@ -803,8 +803,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                 pw.print("<a href='/system/console/configMgr/");
                 pw.print(xss.encodeForHTMLAttr(configPid));
                 pw.print("'>");
-                pw.print(xss.encodeForHTML(
-                        ObjectUtils.defaultIfNull(configPid, "").toString()));
+                pw.print(xss.encodeForHTML(ObjectUtils.defaultIfNull(configPid, "")));
                 pw.print("</a>");
                 pw.println("<br>");
             }
