@@ -39,7 +39,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Dictionary;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -247,9 +246,6 @@ class ServiceUserWebConsolePluginTest {
         }
 
         final @NotNull MockSlingHttpServletResponse response = context.response();
-
-        // workaround SLING-12995 until the fix is released
-        maybeMockConfigurationAdminGetFactoryConfiguration();
 
         // NOTE: replace the replaceAccessControlEntry method with one that does nothing since we are not
         //  testing that functionality here and it doesn't work with the partially mocked acm.
@@ -622,7 +618,7 @@ class ServiceUserWebConsolePluginTest {
 
         if (options.contains(TestConfigOptions.PRECREATE_CONFIGURATIONS)) {
             // provide some "OSGi Configurations" to print in the output and mock the queries
-            ConfigurationAdmin configAdmin = maybeMockConfigurationAdminGetFactoryConfiguration();
+            ConfigurationAdmin configAdmin = context.getService(ConfigurationAdmin.class);
             Configuration config1 =
                     configAdmin.getFactoryConfiguration(ServiceUserWebConsolePlugin.COMPONENT_NAME, "test1", null);
             HashMap<String, Object> props1 = new HashMap<>();
@@ -727,43 +723,6 @@ class ServiceUserWebConsolePluginTest {
     }
 
     // -------------------------- begin helper methods ---------------------------
-
-    /**
-     * To workaround SLING-12995 until the fix is released
-     *
-     * @param requestParams the current map of request parameters
-     */
-    @SuppressWarnings("unchecked")
-    private ConfigurationAdmin maybeMockConfigurationAdminGetFactoryConfiguration() throws IOException {
-        // replace the ConfigurationAdmin field with a mock so we can replace some stuff
-        ConfigurationAdmin cm =
-                Mockito.spy(ReflectionTools.getFieldWithReflection(plugin, "configAdmin", ConfigurationAdmin.class));
-        ReflectionTools.setFieldWithReflection(plugin, "configAdmin", cm);
-        // replace the getFactoryConfiguration method
-        Mockito.doAnswer(invocation -> {
-                    String factoryId = invocation.getArgument(0, String.class);
-                    String name = invocation.getArgument(1, String.class);
-                    String pid = String.format("%s=%s", factoryId, name);
-                    final Configuration originalConfig = cm.getConfiguration(pid, null);
-
-                    // replace the update method to inject the factoryId prop
-                    final Configuration spyConfig = Mockito.spy(originalConfig);
-                    Mockito.doAnswer(invocation2 -> {
-                                Map<String, Object> props = MapUtil.toMap(invocation2.getArgument(0, Dictionary.class));
-                                props.put(
-                                        ConfigurationAdmin.SERVICE_FACTORYPID,
-                                        ServiceUserWebConsolePlugin.COMPONENT_NAME);
-                                originalConfig.update(MapUtil.toDictionary(props));
-                                return null;
-                            })
-                            .when(spyConfig)
-                            .update(any(Dictionary.class));
-                    return spyConfig;
-                })
-                .when(cm)
-                .getFactoryConfiguration(anyString(), anyString(), isNull());
-        return cm;
-    }
 
     /**
      * Register a mock a service user mapping config amendment service
@@ -878,33 +837,6 @@ class ServiceUserWebConsolePluginTest {
             m.add(mapping);
             properties.put("user.mapping", m.toArray(new String[m.size()]));
         }
-        rr.commit();
-
-        return config;
-    }
-
-    /**
-     * Creates a nt:file configuration resource
-     *
-     * @param rr the resource resolver
-     * @param path the path for the cresource
-     * @param mapping (optional) the mapping to apply
-     * @return
-     * @throws PersistenceException
-     */
-    private @NotNull Resource createFileConfig(
-            final @NotNull ResourceResolver rr, @NotNull String path, @Nullable String mapping)
-            throws PersistenceException {
-        Resource config = ResourceUtil.getOrCreateResource(
-                rr, path, Collections.singletonMap(JcrConstants.JCR_PRIMARYTYPE, "nt:file"), NodeType.NT_FOLDER, false);
-
-        Map<String, Object> properties = new HashMap<>();
-        if (mapping != null) {
-            List<String> m = new ArrayList<>();
-            m.add(mapping);
-            properties.put("jcr:data", m.toArray(new String[m.size()]));
-        }
-        rr.create(config, "jcr:content", properties);
         rr.commit();
 
         return config;
