@@ -62,6 +62,7 @@ import org.apache.sling.jcr.base.util.AccessControlUtil;
 import org.apache.sling.serviceusermapping.impl.MappingConfigAmendment;
 import org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl;
 import org.apache.sling.testing.mock.jcr.MockJcr;
+import org.apache.sling.testing.mock.osgi.MapUtil;
 import org.apache.sling.testing.mock.osgi.MockBundle;
 import org.apache.sling.testing.mock.sling.ResourceResolverType;
 import org.apache.sling.testing.mock.sling.junit5.SlingContext;
@@ -84,6 +85,8 @@ import org.mockito.invocation.InvocationOnMock;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
+import org.osgi.service.cm.Configuration;
+import org.osgi.service.cm.ConfigurationAdmin;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -110,10 +113,11 @@ class ServiceUserWebConsolePluginTest {
      */
     private enum TestConfigOptions {
         PRECREATE_SERVICEUSER,
-        PRECREATE_MAPPING_CONFIG,
+        PRECREATE_MAPPING_CONFIG_RESOURCE,
         PRECREATE_MAPPING_CONFIG_USERMAPPING,
         PRECREATE_ACLS,
-        USE_ADMINISTRATIVE_RESOURCE_RESOLVER
+        USE_ADMINISTRATIVE_RESOURCE_RESOLVER,
+        PRECREATE_CONFIGURATIONS
     }
 
     @BeforeEach
@@ -126,6 +130,11 @@ class ServiceUserWebConsolePluginTest {
      * Test method for {@link org.apache.sling.serviceuser.webconsole.impl.ServiceUserWebConsolePlugin#doPost(javax.servlet.http.HttpServletRequest, javax.servlet.http.HttpServletResponse)}.
      */
     protected static Stream<Arguments> testDoPostArgs() {
+        Map<String, Object> reqParams0 = new HashMap<>();
+        reqParams0.put(ServiceUserWebConsolePlugin.PN_NAME, "myserviceuser1");
+        reqParams0.put(ServiceUserWebConsolePlugin.PN_BUNDLE, "my.bundle1");
+        reqParams0.put(ServiceUserWebConsolePlugin.PN_CONFIGURATION_INSTANCE_IDENTIFIER, "myapp1");
+
         Map<String, Object> reqParams1 = new HashMap<>();
         reqParams1.put(ServiceUserWebConsolePlugin.PN_NAME, "myserviceuser1");
         reqParams1.put(ServiceUserWebConsolePlugin.PN_BUNDLE, "my.bundle1");
@@ -133,6 +142,7 @@ class ServiceUserWebConsolePluginTest {
 
         Map<String, Object> reqParams2 = new HashMap<>(reqParams1);
         reqParams2.put(ServiceUserWebConsolePlugin.PN_SUB_SERVICE, "subservice1");
+        reqParams2.put(ServiceUserWebConsolePlugin.PN_CONFIGURATION_INSTANCE_IDENTIFIER, "myapp1");
 
         Map<String, Object> reqParams3 = new HashMap<>(reqParams1);
         // privilege params
@@ -140,21 +150,24 @@ class ServiceUserWebConsolePluginTest {
         reqParams3.put("acl-privilege-0", "jcr:read");
 
         return Stream.of(
+                Arguments.of(reqParams0, new HashSet<>()),
                 Arguments.of(reqParams1, new HashSet<>()),
                 Arguments.of(
                         reqParams1,
                         new HashSet<>(Arrays.asList(TestConfigOptions.USE_ADMINISTRATIVE_RESOURCE_RESOLVER))),
                 Arguments.of(reqParams1, new HashSet<>(Arrays.asList(TestConfigOptions.PRECREATE_SERVICEUSER))),
-                Arguments.of(reqParams1, new HashSet<>(Arrays.asList(TestConfigOptions.PRECREATE_MAPPING_CONFIG))),
+                Arguments.of(
+                        reqParams1, new HashSet<>(Arrays.asList(TestConfigOptions.PRECREATE_MAPPING_CONFIG_RESOURCE))),
                 Arguments.of(
                         reqParams1,
                         new HashSet<>(Arrays.asList(
-                                TestConfigOptions.PRECREATE_SERVICEUSER, TestConfigOptions.PRECREATE_MAPPING_CONFIG))),
+                                TestConfigOptions.PRECREATE_SERVICEUSER,
+                                TestConfigOptions.PRECREATE_MAPPING_CONFIG_RESOURCE))),
                 Arguments.of(
                         reqParams2,
                         new HashSet<>(Arrays.asList(
                                 TestConfigOptions.PRECREATE_SERVICEUSER,
-                                TestConfigOptions.PRECREATE_MAPPING_CONFIG,
+                                TestConfigOptions.PRECREATE_MAPPING_CONFIG_RESOURCE,
                                 TestConfigOptions.PRECREATE_MAPPING_CONFIG_USERMAPPING))),
                 Arguments.of(reqParams3, new HashSet<>(Arrays.asList(TestConfigOptions.PRECREATE_ACLS))));
     }
@@ -174,7 +187,7 @@ class ServiceUserWebConsolePluginTest {
             ((JackrabbitSession) jcrSession).getUserManager().createSystemUser(name, null);
         }
 
-        if (options.contains(TestConfigOptions.PRECREATE_MAPPING_CONFIG)) {
+        if (options.contains(TestConfigOptions.PRECREATE_MAPPING_CONFIG_RESOURCE)) {
             // create the mapping and mock the jcr query
             String appPath = request.getParameter(ServiceUserWebConsolePlugin.PN_APP_PATH);
             String identifier = appPath.substring(appPath.lastIndexOf('/') + 1);
@@ -578,7 +591,10 @@ class ServiceUserWebConsolePluginTest {
         return Stream.of(
                 Arguments.of(new HashSet<>()),
                 Arguments.of(new HashSet<>(Arrays.asList(TestConfigOptions.USE_ADMINISTRATIVE_RESOURCE_RESOLVER))),
-                Arguments.of(new HashSet<>(Arrays.asList(TestConfigOptions.PRECREATE_SERVICEUSER))));
+                Arguments.of(new HashSet<>(Arrays.asList(
+                        TestConfigOptions.PRECREATE_CONFIGURATIONS,
+                        TestConfigOptions.PRECREATE_ACLS,
+                        TestConfigOptions.PRECREATE_SERVICEUSER))));
     }
 
     @ParameterizedTest
@@ -600,38 +616,47 @@ class ServiceUserWebConsolePluginTest {
         final ResourceResolver rr = request.getResourceResolver();
         final @Nullable Session jcrSession = rr.adaptTo(Session.class);
 
-        // provide some "OSGi Configurations" to print in the output and mock the queries
-        String mapping1 =
-                toUserMappingValue(bundleContext.getBundle().getSymbolicName(), "subservice1", "myserviceuser1");
-        Resource config1 = createOsgiConfig(
-                rr,
-                "/apps/sling/install/org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl.amended~test1",
-                mapping1);
-        MockJcr.setQueryResult(
-                jcrSession,
-                "SELECT * FROM [sling:OsgiConfig] AS s WHERE (ISDESCENDANTNODE([/apps]) OR ISDESCENDANTNODE([/libs])) AND NAME(s) LIKE 'org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl.amended%' AND [user.mapping] LIKE '%=myserviceuser1'",
-                Query.JCR_SQL2,
-                Arrays.asList(config1.adaptTo(Node.class)));
-        // also the alternate code path where the config is stored as a nt:file resource
-        String mapping2 =
-                toUserMappingValue(bundleContext.getBundle().getSymbolicName(), "subservice2", "myserviceuser1");
-        Resource config2 = createFileConfig(
-                rr,
-                "/apps/sling/install/org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl.amended~test2",
-                mapping2);
-        MockJcr.setQueryResult(
-                jcrSession,
-                "SELECT * FROM [nt:file] AS s WHERE (ISDESCENDANTNODE([/apps]) OR ISDESCENDANTNODE([/libs])) AND NAME(s) LIKE 'org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl.amended%' AND [jcr:content/jcr:data] LIKE '%=myserviceuser1%'",
-                Query.JCR_SQL2,
-                Arrays.asList(config2.adaptTo(Node.class)));
+        if (options.contains(TestConfigOptions.PRECREATE_CONFIGURATIONS)) {
+            // provide some "OSGi Configurations" to print in the output and mock the queries
+            ConfigurationAdmin configAdmin = context.getService(ConfigurationAdmin.class);
+            Configuration config1 =
+                    configAdmin.getFactoryConfiguration(ServiceUserWebConsolePlugin.COMPONENT_NAME, "test1", null);
+            HashMap<String, Object> props1 = new HashMap<>();
+            String mapping1 =
+                    toUserMappingValue(bundleContext.getBundle().getSymbolicName(), "subservice1", "myserviceuser1");
+            props1.put("user.mapping", new String[] {mapping1});
+            // simulate a config loaded by jcrinstall
+            props1.put(
+                    "_jcr_config_path",
+                    "jcrinstall:/libs/config/org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl.amended~test1.pid");
+            config1.update(MapUtil.toDictionary(props1));
 
-        // provide some "ACLs" to print in the output and mock the query
-        Resource node1 = createNodeWithAce(rr, "/content/node1", "myserviceuser1");
-        MockJcr.setQueryResult(
-                jcrSession,
-                "SELECT * FROM [rep:GrantACE] AS s WHERE  [rep:principalName] = 'myserviceuser1'",
-                Query.JCR_SQL2,
-                Arrays.asList(node1.adaptTo(Node.class)));
+            Configuration config2 =
+                    configAdmin.getFactoryConfiguration(ServiceUserWebConsolePlugin.COMPONENT_NAME, "test2", null);
+            HashMap<String, Object> props2 = new HashMap<>();
+            String mapping2 = toUserMappingValue(
+                    bundleContext.getBundle().getSymbolicName(), "subservice1", null, Arrays.asList("myserviceuser1"));
+            props2.put("user.mapping", new String[] {mapping2});
+            config2.update(MapUtil.toDictionary(props2));
+
+            Configuration config3 =
+                    configAdmin.getFactoryConfiguration(ServiceUserWebConsolePlugin.COMPONENT_NAME, "test3", null);
+            HashMap<String, Object> props3 = new HashMap<>();
+            String mapping3 = toUserMappingValue(
+                    bundleContext.getBundle().getSymbolicName(), "subservice1", null, Arrays.asList("myserviceuser2"));
+            props3.put("user.mapping", new String[] {mapping3});
+            config3.update(MapUtil.toDictionary(props3));
+        }
+
+        if (options.contains(TestConfigOptions.PRECREATE_ACLS)) {
+            // provide some "ACLs" to print in the output and mock the query
+            Resource node1 = createNodeWithAce(rr, "/content/node1", "myserviceuser1");
+            MockJcr.setQueryResult(
+                    jcrSession,
+                    "SELECT * FROM [rep:GrantACE] AS s WHERE  [rep:principalName] = 'myserviceuser1'",
+                    Query.JCR_SQL2,
+                    Arrays.asList(node1.adaptTo(Node.class)));
+        }
 
         if (options.contains(TestConfigOptions.PRECREATE_SERVICEUSER)) {
             ((JackrabbitSession) jcrSession).getUserManager().createSystemUser("myserviceuser1", null);
@@ -812,33 +837,6 @@ class ServiceUserWebConsolePluginTest {
             m.add(mapping);
             properties.put("user.mapping", m.toArray(new String[m.size()]));
         }
-        rr.commit();
-
-        return config;
-    }
-
-    /**
-     * Creates a nt:file configuration resource
-     *
-     * @param rr the resource resolver
-     * @param path the path for the cresource
-     * @param mapping (optional) the mapping to apply
-     * @return
-     * @throws PersistenceException
-     */
-    private @NotNull Resource createFileConfig(
-            final @NotNull ResourceResolver rr, @NotNull String path, @Nullable String mapping)
-            throws PersistenceException {
-        Resource config = ResourceUtil.getOrCreateResource(
-                rr, path, Collections.singletonMap(JcrConstants.JCR_PRIMARYTYPE, "nt:file"), NodeType.NT_FOLDER, false);
-
-        Map<String, Object> properties = new HashMap<>();
-        if (mapping != null) {
-            List<String> m = new ArrayList<>();
-            m.add(mapping);
-            properties.put("jcr:data", m.toArray(new String[m.size()]));
-        }
-        rr.create(config, "jcr:content", properties);
         rr.commit();
 
         return config;

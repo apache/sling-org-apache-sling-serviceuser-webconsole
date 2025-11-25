@@ -20,7 +20,7 @@ package org.apache.sling.serviceuser.webconsole.impl;
 
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
-import javax.jcr.nodetype.NodeType;
+import javax.jcr.nodetype.NodeTypeManager;
 import javax.jcr.query.Query;
 import javax.jcr.security.AccessControlEntry;
 import javax.jcr.security.AccessControlList;
@@ -43,11 +43,16 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Dictionary;
 import java.util.HashMap;
+import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.stream.StreamSupport;
 
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.ObjectUtils;
@@ -74,13 +79,19 @@ import org.apache.sling.jcr.base.util.AccessControlUtil;
 import org.apache.sling.serviceusermapping.Mapping;
 import org.apache.sling.serviceusermapping.ServiceUserMapper;
 import org.apache.sling.xss.XSSAPI;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
+import org.osgi.framework.InvalidSyntaxException;
+import org.osgi.service.cm.Configuration;
+import org.osgi.service.cm.ConfigurationAdmin;
 import org.osgi.service.component.ComponentContext;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
+import org.osgi.util.converter.Converters;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -98,6 +109,8 @@ import org.slf4j.LoggerFactory;
 @SuppressWarnings("serial")
 public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
 
+    private static final String PROP_USER_MAPPING = "user.mapping";
+    private static final String NT_SLING_OSGI_CONFIG = "sling:OsgiConfig";
     private static final String TD = "</td>";
     private static final String BR = "<br/>";
     private static final String TR = "</tr>";
@@ -114,6 +127,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
     public static final String PN_BUNDLE = "bundle";
     public static final String PN_NAME = "name";
     public static final String PN_SUB_SERVICE = "subService";
+    public static final String PN_CONFIGURATION_INSTANCE_IDENTIFIER = "configurationInstanceIdentifier";
     public static final String PN_USER = "user";
     public static final String PN_USER_PATH = "userPath";
 
@@ -127,24 +141,51 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
 
     private final ServiceUserMapper mapper;
 
+    private final ConfigurationAdmin configAdmin;
+
     @Activate
     public ServiceUserWebConsolePlugin(
             ComponentContext context,
             @Reference XSSAPI xss,
             @Reference ResourceResolverFactory resolverFactory,
-            @Reference ServiceUserMapper mapper) {
+            @Reference ServiceUserMapper mapper,
+            @Reference ConfigurationAdmin configAdmin) {
         super();
         this.bundleContext = context.getBundleContext();
         this.xss = xss;
         this.resolverFactory = resolverFactory;
         this.mapper = mapper;
+        this.configAdmin = configAdmin;
     }
 
     private boolean createOrUpdateMapping(HttpServletRequest request, ResourceResolver resolver) {
-
         String appPath = getParameter(request, PN_APP_PATH, "");
+        // if the appPath was not supplied or the sling:OsgiConfig node type is missing
+        //  then delegate to the ConfigurationAdmin apis to decide where to store it
+        if (StringUtils.isBlank(appPath) || !hasRegisteredNodeType(resolver, NT_SLING_OSGI_CONFIG)) {
+            return createOrUpdateConfigViaConfigAdmin(request);
+        } else {
+            // a specific "appPath" was requested, so fallback to creating the configuration
+            // resource manually and wait for the JcrInstaller to detect and process it
+            return createOrUpdateConfigViaOsgiConfigResource(request, resolver);
+        }
+    }
 
-        String instanceIdentifier = appPath.substring(appPath.lastIndexOf('/') + 1);
+    /**
+     * Create or update the persisted configuration by creating a sling:OsgiConfig resource
+     * under the request app path
+     *
+     * @param request the request to process
+     * @return true if the config resource was persisted, false otherwise
+     */
+    private boolean createOrUpdateConfigViaOsgiConfigResource(HttpServletRequest request, ResourceResolver resolver) {
+        String appPath = getParameter(request, PN_APP_PATH, "");
+        String instanceIdentifier = getParameter(request, PN_CONFIGURATION_INSTANCE_IDENTIFIER, "");
+        if (StringUtils.isBlank(instanceIdentifier)) {
+            // no value specified, so fallback to the old way of using the last segment of the appPath value
+            instanceIdentifier = appPath.substring(appPath.lastIndexOf('/') + 1);
+        }
+
         String pid = String.format("%s~%s", COMPONENT_NAME, instanceIdentifier);
         Iterator<Resource> configs = resolver.findResources(
                 "SELECT * FROM [sling:OsgiConfig] WHERE ISDESCENDANTNODE([" + appPath + "]) AND NAME() = '" + pid + "'",
@@ -158,36 +199,21 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                 config = configs.next();
                 log.debug("Using existing configuration {}", config);
             } else {
-                String path =
-                        appPath + "/config/" + COMPONENT_NAME + "-" + appPath.substring(appPath.lastIndexOf('/') + 1);
+                String path = appPath + "/config/" + COMPONENT_NAME + "-" + instanceIdentifier;
                 log.debug("Creating new configuration {}", path);
 
                 config = ResourceUtil.getOrCreateResource(
                         resolver,
                         path,
-                        Collections.singletonMap(JcrConstants.JCR_PRIMARYTYPE, (Object) "sling:OsgiConfig"),
-                        NodeType.NT_FOLDER,
+                        Collections.singletonMap(JcrConstants.JCR_PRIMARYTYPE, (Object) NT_SLING_OSGI_CONFIG),
+                        null,
                         false);
                 dirty = true;
             }
 
-            String bundle = getParameter(request, PN_BUNDLE, "");
-            String subService = getParameter(request, PN_SUB_SERVICE, "");
-            String name = getParameter(request, PN_NAME, "");
-            String mapping = bundle + (StringUtils.isNotBlank(subService) ? ":" + subService : "") + "=" + name;
-
             ModifiableValueMap properties = config.adaptTo(ModifiableValueMap.class);
-            String[] mappings = properties.get("user.mapping", new String[0]);
-            if (!ArrayUtils.contains(mappings, mapping)) {
-                log.debug("Adding {} into service user mapping", mapping);
-                List<String> m = new ArrayList<>();
-                m.addAll(Arrays.asList(mappings));
-                m.add(mapping);
-                properties.put("user.mapping", m.toArray(new String[m.size()]));
-                dirty = true;
-            } else {
-                log.debug("Already found {} in service user mapping", mapping);
-            }
+            dirty = updateUserMappingProperty(request, dirty, properties::get, properties::put);
+
             if (dirty) {
                 log.debug("Saving changes to osgi config");
                 resolver.commit();
@@ -196,8 +222,88 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
             log.warn("Exception creating service mapping", e);
             return false;
         }
+        return true;
+    }
+
+    /**
+     * Create or update the persisted configuration by delegating to the ConfigurationAdmin
+     * apis.
+     *
+     * @param request the request to process
+     * @return true if the config was persisted, false otherwise
+     */
+    private boolean createOrUpdateConfigViaConfigAdmin(HttpServletRequest request) {
+        boolean dirty = false;
+        Configuration cfg;
+        String instanceIdentifier = getParameter(request, PN_CONFIGURATION_INSTANCE_IDENTIFIER, "");
+        try {
+            cfg = configAdmin.getFactoryConfiguration(COMPONENT_NAME, instanceIdentifier, null);
+        } catch (IOException e) {
+            log.warn("Exception getting factory configuration", e);
+            return false;
+        }
+        final String pid = cfg.getPid();
+        Dictionary<String, Object> properties = cfg.getProperties();
+        if (properties != null) {
+            log.debug("Updating existing configuration {}", pid);
+        } else {
+            log.debug("Creating new configuration {}", pid);
+            properties = new Hashtable<>();
+            dirty = true;
+        }
+
+        dirty = updateUserMappingProperty(request, dirty, properties::get, properties::put);
+
+        if (dirty) {
+            log.debug("Saving changes to osgi config");
+            try {
+                cfg.update(properties);
+            } catch (IOException e) {
+                log.warn("Exception storing factory configuration", e);
+                return false;
+            }
+        }
 
         return true;
+    }
+
+    /**
+     * Updates the user.mapping property if it does not already exist
+     *
+     * @param request the current request
+     * @param dirty specifies if there are changes to be persisted
+     * @param getFn the function to get the current value
+     * @param putFn the function to set the current value
+     * @return true if updates happened or the original dirty argument otherwise
+     */
+    private boolean updateUserMappingProperty(
+            HttpServletRequest request,
+            boolean dirty,
+            Function<String, Object> getFn,
+            BiFunction<String, Object, Object> putFn) {
+        String bundle = getParameter(request, PN_BUNDLE, "");
+        String subService = getParameter(request, PN_SUB_SERVICE, "");
+        String name = getParameter(request, PN_NAME, "");
+        String mapping = bundle + (StringUtils.isNotBlank(subService) ? ":" + subService : "") + "=[" + name + "]";
+
+        Object mappingsValue = getFn.apply(PROP_USER_MAPPING);
+        String[] mappings;
+        if (mappingsValue instanceof String[]) {
+            mappings = (String[]) mappingsValue;
+        } else {
+            mappings = new String[0];
+        }
+        if (!ArrayUtils.contains(mappings, mapping)) {
+            log.debug("Adding {} into service user mapping", mapping);
+            List<String> m = new ArrayList<>();
+            m.addAll(Arrays.asList(mappings));
+            m.add(mapping);
+            putFn.apply(PROP_USER_MAPPING, m.toArray(new String[m.size()]));
+            dirty = true;
+        } else {
+            log.debug("Already found {} in service user mapping", mapping);
+        }
+        return dirty;
     }
 
     @Override
@@ -207,9 +313,13 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
 
         ResourceResolver resolver = null;
         try {
+            // NOTE: the appPath param can now be blank if the persistence location is not specific
             if (StringUtils.isBlank(getParameter(request, PN_NAME, ""))
                     || StringUtils.isBlank(getParameter(request, PN_BUNDLE, ""))
-                    || StringUtils.isBlank(getParameter(request, PN_APP_PATH, ""))) {
+                    // NOTE: if an appPath value is supplied then the configurationInstanceIdentifier
+                    //    becomes optional since the value can fallback to the last segment of the appPath
+                    || (StringUtils.isBlank(getParameter(request, PN_APP_PATH, ""))
+                            && StringUtils.isBlank(getParameter(request, PN_CONFIGURATION_INSTANCE_IDENTIFIER, "")))) {
                 sendErrorRedirect(request, response, "Missing required parameters!");
                 return;
             }
@@ -304,29 +414,79 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
         return bundles.get(symbolicName);
     }
 
-    private Object findConfigurations(ResourceResolver resolver, String name, List<String> affectedPaths) {
+    /**
+     * Helper to check if the specified node type has been registered
+     *
+     * @param resolver the resolver to check
+     * @param typeName the node type name to check
+     * @return true if the node type exists, false otherwise
+     */
+    private boolean hasRegisteredNodeType(@NotNull ResourceResolver resolver, @NotNull String typeName) {
+        boolean hasNodeType = false;
+        final @Nullable Session jcrSession = resolver.adaptTo(Session.class);
+        if (jcrSession != null) {
+            try {
+                final NodeTypeManager nodeTypeManager =
+                        jcrSession.getWorkspace().getNodeTypeManager();
+                hasNodeType = nodeTypeManager.hasNodeType(typeName);
+            } catch (RepositoryException e) {
+                log.warn("Unable to detemine if node type is registered", e);
+            }
+        }
+        return hasNodeType;
+    }
+
+    private String[] findConfigurations(String name, List<String> affectedPaths) {
         List<String> configurations = new ArrayList<>();
 
-        Iterator<Resource> configResources = resolver.findResources(
-                "SELECT * FROM [sling:OsgiConfig] AS s WHERE (ISDESCENDANTNODE([/apps]) OR ISDESCENDANTNODE([/libs])) AND NAME(s) LIKE 'org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl.amended%' AND [user.mapping] LIKE '%="
-                        + name + "'",
-                Query.JCR_SQL2);
-        while (configResources.hasNext()) {
-            Resource configResource = configResources.next();
-            affectedPaths.add(configResource.getPath());
-            configurations.add(configResource.getPath());
-        }
-        configResources = resolver.findResources(
-                "SELECT * FROM [nt:file] AS s WHERE (ISDESCENDANTNODE([/apps]) OR ISDESCENDANTNODE([/libs])) AND NAME(s) LIKE 'org.apache.sling.serviceusermapping.impl.ServiceUserMapperImpl.amended%' AND [jcr:content/jcr:data] LIKE '%="
-                        + name + "%'",
-                Query.JCR_SQL2);
-        while (configResources.hasNext()) {
-            Resource configResource = configResources.next();
-            affectedPaths.add(configResource.getPath());
-            configurations.add(configResource.getPath());
+        Configuration[] cfg = null;
+        try {
+            cfg = configAdmin.listConfigurations("(service.factoryPid=" + COMPONENT_NAME + "*)");
+        } catch (IOException | InvalidSyntaxException e) {
+            log.warn("Failed to list the configurations", e);
         }
 
-        return configurations.toArray();
+        // scan the configurations to find any that are mapped to our user
+        if (cfg != null) {
+            for (Configuration configuration : cfg) {
+                final Dictionary<String, Object> properties = configuration.getProperties();
+                String[] userMappings = Converters.standardConverter()
+                        .convert(properties.get(PROP_USER_MAPPING))
+                        .defaultValue(new String[0])
+                        .to(String[].class);
+                boolean hasMapName = false;
+                boolean hasMapPrincipal = false;
+                for (String userMapping : userMappings) {
+                    // delegate to the Mapping class to parse the value
+                    final Mapping mapping = new Mapping(userMapping.trim());
+
+                    // check for match in userName variant
+                    final String serviceName = mapping.getServiceName();
+                    final String subServiceName = mapping.getSubServiceName();
+                    hasMapName = name.equals(mapping.map(serviceName, subServiceName));
+                    // check for match in principalNames variant
+                    final Iterable<String> mapPrincipals = mapping.mapPrincipals(serviceName, subServiceName);
+                    if (mapPrincipals != null) {
+                        hasMapPrincipal = StreamSupport.stream(mapPrincipals.spliterator(), false)
+                                .anyMatch(name::equals);
+                    }
+
+                    if (hasMapName || hasMapPrincipal) {
+                        // found a match, so keep track of it
+                        configurations.add(configuration.getPid());
+                        // if this has a jcr install path, add it to the affected paths
+                        String jcrConfigPath = (String) properties.get("_jcr_config_path");
+                        if (jcrConfigPath != null) {
+                            affectedPaths.add(jcrConfigPath.substring(jcrConfigPath.indexOf(':') + 1));
+                        }
+                        // found a match, so we can stop looking
+                        break;
+                    }
+                }
+            }
+        }
+
+        return configurations.toArray(new String[configurations.size()]);
     }
 
     private String[] findMappings(String name) {
@@ -637,7 +797,16 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
             tableRows(pw);
 
             td(pw, "OSGi Configurations");
-            td(pw, findConfigurations(resolver, name, affectedPaths));
+            pw.print("<td>");
+            String[] findConfigurations = findConfigurations(name, affectedPaths);
+            for (String configPid : findConfigurations) {
+                pw.print("<a href='/system/console/configMgr/");
+                pw.print(xss.encodeForHTMLAttr(configPid));
+                pw.print("'>");
+                pw.print(xss.encodeForHTML(ObjectUtils.defaultIfNull(configPid, "")));
+                pw.print("</a>");
+                pw.println("<br>");
+            }
 
             tableRows(pw);
 
@@ -727,15 +896,36 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                 "Optional: Allows for different permissions for different services within a bundle");
 
         tableRows(pw);
-        String appPath = getParameter(request, PN_APP_PATH, "");
+        String configInstanceIdentifier = getParameter(request, PN_CONFIGURATION_INSTANCE_IDENTIFIER, "");
         textField(
                 pw,
-                "Application Path",
-                PN_APP_PATH,
-                appPath,
-                "The application under which to create the OSGi Configuration for the Service User Mapping, e.g. /apps/myapp");
-
+                "Configuration Instance Identifier",
+                PN_CONFIGURATION_INSTANCE_IDENTIFIER,
+                configInstanceIdentifier,
+                "The instance idenfitier suffix for the configuration PID");
         tableRows(pw);
+
+        // hide this field if the nodetype from org.apache.sling.installer.provider.jcr is missing
+        ResourceResolver resolver = null;
+        try {
+            resolver = getResourceResolver(request);
+
+            if (hasRegisteredNodeType(resolver, NT_SLING_OSGI_CONFIG)) {
+                String appPath = getParameter(request, PN_APP_PATH, "");
+                textField(
+                        pw,
+                        "Application Path",
+                        PN_APP_PATH,
+                        appPath,
+                        "Optional: The application under which to create the OSGi Configuration for the Service User Mapping, e.g. /apps/myapp or leave empty to delegate to ConfigurationAdmin to decide where to store it");
+
+                tableRows(pw);
+            }
+        } finally {
+            if (needsAdministrativeResolver(request) && resolver != null) {
+                resolver.close();
+            }
+        }
 
         List<Pair<String, String>> privileges = getPrivileges(request);
         printPrivilegeSelect(
@@ -835,9 +1025,14 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
     private void sendErrorRedirect(HttpServletRequest request, HttpServletResponse response, String alert)
             throws IOException {
         List<String> params = new ArrayList<>();
-        for (String param : new String[] {PN_APP_PATH, PN_BUNDLE, PN_NAME, PN_SUB_SERVICE, PN_USER_PATH}) {
-            params.add(param + "="
-                    + URLEncoder.encode(this.getParameter(request, param, ""), StandardCharsets.UTF_8.toString()));
+        for (String param : new String[] {
+            PN_CONFIGURATION_INSTANCE_IDENTIFIER, PN_APP_PATH, PN_BUNDLE, PN_NAME, PN_SUB_SERVICE, PN_USER_PATH
+        }) {
+            final String parameterValue = this.getParameter(request, param, "");
+            // only append the param if it has a non-empty value
+            if (!StringUtils.isEmpty(parameterValue)) {
+                params.add(param + "=" + URLEncoder.encode(parameterValue, StandardCharsets.UTF_8.toString()));
+            }
         }
 
         int idx = 0;
