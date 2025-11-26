@@ -132,15 +132,15 @@ public class ServiceUserWebConsolePlugin extends AbstractServlet {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceUserWebConsolePlugin.class);
 
-    private final BundleContext bundleContext;
+    private final transient BundleContext bundleContext;
 
-    private final XSSAPI xss;
+    private final transient XSSAPI xss;
 
-    private final ResourceResolverFactory resolverFactory;
+    private final transient ResourceResolverFactory resolverFactory;
 
-    private final ServiceUserMapper mapper;
+    private final transient ServiceUserMapper mapper;
 
-    private final ConfigurationAdmin configAdmin;
+    private final transient ConfigurationAdmin configAdmin;
 
     @Activate
     public ServiceUserWebConsolePlugin(
@@ -595,7 +595,7 @@ public class ServiceUserWebConsolePlugin extends AbstractServlet {
     }
 
     /**
-     * Called internally by {@link AbstractWebConsolePlugin} to load resources.
+     * Called internally by {@link AbstractServlet} to load resources.
      *
      * This particular implementation depends on the label. As example, if the
      * plugin is accessed as <code>/system/console/abc</code>, and the plugin
@@ -607,6 +607,7 @@ public class ServiceUserWebConsolePlugin extends AbstractServlet {
      * @param path the path to read.
      * @return the URL of the resource or <code>null</code> if not found.
      */
+    @Override
     protected URL getResource(String path) {
         String base = "/" + LABEL + "/";
         return (path != null && path.startsWith(base))
