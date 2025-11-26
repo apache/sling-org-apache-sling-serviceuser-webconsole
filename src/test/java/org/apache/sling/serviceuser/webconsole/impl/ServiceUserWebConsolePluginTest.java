@@ -28,8 +28,6 @@ import javax.jcr.security.AccessControlList;
 import javax.jcr.security.AccessControlManager;
 import javax.jcr.security.AccessControlPolicy;
 import javax.jcr.security.Privilege;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
 import java.net.URLEncoder;
@@ -46,6 +44,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
 
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletResponse;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.api.JackrabbitSession;
@@ -67,8 +67,8 @@ import org.apache.sling.testing.mock.osgi.MockBundle;
 import org.apache.sling.testing.mock.sling.ResourceResolverType;
 import org.apache.sling.testing.mock.sling.junit5.SlingContext;
 import org.apache.sling.testing.mock.sling.junit5.SlingContextExtension;
-import org.apache.sling.testing.mock.sling.servlet.MockSlingHttpServletRequest;
-import org.apache.sling.testing.mock.sling.servlet.MockSlingHttpServletResponse;
+import org.apache.sling.testing.mock.sling.servlet.MockSlingJakartaHttpServletRequest;
+import org.apache.sling.testing.mock.sling.servlet.MockSlingJakartaHttpServletResponse;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -176,7 +176,7 @@ class ServiceUserWebConsolePluginTest {
     @MethodSource("testDoPostArgs")
     void testDoPost(Map<String, Object> requestParams, Set<TestConfigOptions> options)
             throws ServletException, IOException, RepositoryException, LoginException {
-        final @NotNull MockSlingHttpServletRequest request = context.request();
+        final @NotNull MockSlingJakartaHttpServletRequest request = context.jakartaRequest();
         request.setParameterMap(requestParams);
 
         final ResourceResolver rr = request.getResourceResolver();
@@ -245,7 +245,7 @@ class ServiceUserWebConsolePluginTest {
                     .getPolicies(anyString());
         }
 
-        final @NotNull MockSlingHttpServletResponse response = context.response();
+        final @NotNull MockSlingJakartaHttpServletResponse response = context.jakartaResponse();
 
         // NOTE: replace the replaceAccessControlEntry method with one that does nothing since we are not
         //  testing that functionality here and it doesn't work with the partially mocked acm.
@@ -276,7 +276,7 @@ class ServiceUserWebConsolePluginTest {
 
     @Test
     void testDoPostWithFailureInCreateOrUpdateMapping() throws ServletException, IOException {
-        final @NotNull MockSlingHttpServletRequest request = context.request();
+        final @NotNull MockSlingJakartaHttpServletRequest request = context.jakartaRequest();
 
         // simulate the resolver request attribute existing
         final ResourceResolver rr = Mockito.spy(request.getResourceResolver());
@@ -290,7 +290,7 @@ class ServiceUserWebConsolePluginTest {
         params.put(ServiceUserWebConsolePlugin.PN_APP_PATH, "/apps/myapp1");
         request.setParameterMap(params);
 
-        final @NotNull MockSlingHttpServletResponse response = context.response();
+        final @NotNull MockSlingJakartaHttpServletResponse response = context.jakartaResponse();
 
         // provide a mocked AccessControlManager object
         JackrabbitAccessControlManager acm = Mockito.mock(JackrabbitAccessControlManager.class);
@@ -306,7 +306,7 @@ class ServiceUserWebConsolePluginTest {
 
     @Test
     void testDoPostWithFailureInUpdatePrivileges() throws ServletException, IOException, RepositoryException {
-        final @NotNull MockSlingHttpServletRequest request = context.request();
+        final @NotNull MockSlingJakartaHttpServletRequest request = context.jakartaRequest();
 
         // simulate the resolver request attribute existing
         final ResourceResolver rr = Mockito.spy(request.getResourceResolver());
@@ -318,7 +318,7 @@ class ServiceUserWebConsolePluginTest {
         params.put(ServiceUserWebConsolePlugin.PN_APP_PATH, "/apps/myapp1");
         request.setParameterMap(params);
 
-        final @NotNull MockSlingHttpServletResponse response = context.response();
+        final @NotNull MockSlingJakartaHttpServletResponse response = context.jakartaResponse();
 
         // simulate an exception thrown during the updatePrivileges logic
         Session jcrSession = Mockito.spy(rr.adaptTo(Session.class));
@@ -337,7 +337,7 @@ class ServiceUserWebConsolePluginTest {
     @ValueSource(booleans = {true, false})
     void testDoPostWithFailureToCreateServiceUser(boolean throwExceptionDuringRefresh)
             throws ServletException, IOException, RepositoryException {
-        final @NotNull MockSlingHttpServletRequest request = context.request();
+        final @NotNull MockSlingJakartaHttpServletRequest request = context.jakartaRequest();
 
         // simulate a RepositoryException thrown while creating the system user
         final ResourceResolver rr = Mockito.spy(request.getResourceResolver());
@@ -364,7 +364,7 @@ class ServiceUserWebConsolePluginTest {
         params.put(ServiceUserWebConsolePlugin.PN_APP_PATH, "/apps/myapp1");
         request.setParameterMap(params);
 
-        final @NotNull MockSlingHttpServletResponse response = context.response();
+        final @NotNull MockSlingJakartaHttpServletResponse response = context.jakartaResponse();
 
         plugin.doPost(request, response);
 
@@ -376,7 +376,7 @@ class ServiceUserWebConsolePluginTest {
 
     @Test
     void testDoPostWithCaughtLoginException() throws LoginException, ServletException, IOException {
-        final @NotNull MockSlingHttpServletRequest request = context.request();
+        final @NotNull MockSlingJakartaHttpServletRequest request = context.jakartaRequest();
 
         mockResolverFactoryThrowsLoginException();
 
@@ -386,7 +386,7 @@ class ServiceUserWebConsolePluginTest {
         params.put(ServiceUserWebConsolePlugin.PN_APP_PATH, "/apps/myapp1");
         request.setParameterMap(params);
 
-        final @NotNull MockSlingHttpServletResponse response = context.response();
+        final @NotNull MockSlingJakartaHttpServletResponse response = context.jakartaResponse();
 
         plugin.doPost(request, response);
 
@@ -399,7 +399,7 @@ class ServiceUserWebConsolePluginTest {
     @SuppressWarnings("deprecation")
     @Test
     void testDoPostWithNullResourceResolver() throws LoginException, ServletException, IOException {
-        final @NotNull MockSlingHttpServletRequest request = context.request();
+        final @NotNull MockSlingJakartaHttpServletRequest request = context.jakartaRequest();
 
         // simulate the resolverFactory returning a null administrative resource resolver
         ResourceResolverFactory rrf =
@@ -414,7 +414,7 @@ class ServiceUserWebConsolePluginTest {
         params.put(ServiceUserWebConsolePlugin.PN_APP_PATH, "/apps/myapp1");
         request.setParameterMap(params);
 
-        final @NotNull MockSlingHttpServletResponse response = context.response();
+        final @NotNull MockSlingJakartaHttpServletResponse response = context.jakartaResponse();
 
         plugin.doPost(request, response);
 
@@ -426,7 +426,7 @@ class ServiceUserWebConsolePluginTest {
 
     @Test
     void testDoPostWithIOExceptionDuringErrorRedirect() throws LoginException {
-        final @NotNull MockSlingHttpServletRequest request = context.request();
+        final @NotNull MockSlingJakartaHttpServletRequest request = context.jakartaRequest();
 
         mockResolverFactoryThrowsLoginException();
 
@@ -436,7 +436,7 @@ class ServiceUserWebConsolePluginTest {
         params.put(ServiceUserWebConsolePlugin.PN_APP_PATH, "/apps/myapp1");
         request.setParameterMap(params);
 
-        final @NotNull MockSlingHttpServletResponse response = Mockito.spy(context.response());
+        final @NotNull MockSlingJakartaHttpServletResponse response = Mockito.spy(context.jakartaResponse());
         Mockito.doThrow(IOException.class).when(response).sendRedirect(anyString());
 
         assertDoesNotThrow(() -> plugin.doPost(request, response));
@@ -467,9 +467,9 @@ class ServiceUserWebConsolePluginTest {
     @MethodSource("testDoPostWithMissingParametersArgs")
     void testDoPostWithMissingParameters(Map<String, Object> params, Map<String, Object> expectedRedirectParams)
             throws ServletException, IOException {
-        final @NotNull MockSlingHttpServletRequest request = context.request();
+        final @NotNull MockSlingJakartaHttpServletRequest request = context.jakartaRequest();
         request.setParameterMap(params);
-        final @NotNull MockSlingHttpServletResponse response = context.response();
+        final @NotNull MockSlingJakartaHttpServletResponse response = context.jakartaResponse();
 
         plugin.doPost(request, response);
 
@@ -489,14 +489,6 @@ class ServiceUserWebConsolePluginTest {
     }
 
     /**
-     * Test method for {@link org.apache.sling.serviceuser.webconsole.impl.ServiceUserWebConsolePlugin#getLabel()}.
-     */
-    @Test
-    void testGetLabel() {
-        assertEquals("serviceusers", plugin.getLabel());
-    }
-
-    /**
      * Test method for {@link org.apache.sling.serviceuser.webconsole.impl.ServiceUserWebConsolePlugin#getResource(java.lang.String)}.
      */
     @Test
@@ -509,14 +501,6 @@ class ServiceUserWebConsolePluginTest {
     @ValueSource(strings = {"/serviceusers/invalid.js"})
     void testGetResourceForInvalidPath(String path) {
         assertNull(plugin.getResource(path));
-    }
-
-    /**
-     * Test method for {@link org.apache.sling.serviceuser.webconsole.impl.ServiceUserWebConsolePlugin#getTitle()}.
-     */
-    @Test
-    void testGetTitle() {
-        assertEquals("Service Users", plugin.getTitle());
     }
 
     /**
@@ -544,7 +528,7 @@ class ServiceUserWebConsolePluginTest {
         Mockito.doReturn(new Bundle[] {bc.getBundle()}).when(bc).getBundles();
         ReflectionTools.setFieldWithReflection(plugin, "bundleContext", bc);
 
-        final @NotNull MockSlingHttpServletRequest request = context.request();
+        final @NotNull MockSlingJakartaHttpServletRequest request = context.jakartaRequest();
         Map<String, Object> params = new HashMap<>();
         params.put(ServiceUserWebConsolePlugin.PN_ACTION, action);
         params.put(ServiceUserWebConsolePlugin.PN_ALERT, "some alert here");
@@ -565,7 +549,7 @@ class ServiceUserWebConsolePluginTest {
         Mockito.doReturn(supportedPrivileges).when(acm).getSupportedPrivileges("/");
         MockJcr.setAccessControlManager(rr.adaptTo(Session.class), acm);
 
-        final @NotNull MockSlingHttpServletResponse response = context.response();
+        final @NotNull MockSlingJakartaHttpServletResponse response = context.jakartaResponse();
         plugin.renderContent(request, response);
         final String outputAsString = response.getOutputAsString();
         assertNotNull(outputAsString);
@@ -574,13 +558,13 @@ class ServiceUserWebConsolePluginTest {
     @Test
     void testRenderContentForServiceUsersWithCaughtLoginException()
             throws ServletException, IOException, LoginException {
-        final @NotNull MockSlingHttpServletRequest request = context.request();
+        final @NotNull MockSlingJakartaHttpServletRequest request = context.jakartaRequest();
         Map<String, Object> params = new HashMap<>();
         request.setParameterMap(params);
 
         mockResolverFactoryThrowsLoginException();
 
-        final @NotNull MockSlingHttpServletResponse response = context.response();
+        final @NotNull MockSlingJakartaHttpServletResponse response = context.jakartaResponse();
         plugin.renderContent(request, response);
         final String outputAsString = response.getOutputAsString();
         assertNotNull(outputAsString);
@@ -611,7 +595,7 @@ class ServiceUserWebConsolePluginTest {
                 "another.bundle1", "subservice2", null, Arrays.asList("otheruser1", "otheruser2"), 2);
         mockMappingConfigAmendment("another.bundle2", "subservice3", "otheruser3", 5);
 
-        final @NotNull MockSlingHttpServletRequest request = context.request();
+        final @NotNull MockSlingJakartaHttpServletRequest request = context.jakartaRequest();
 
         final ResourceResolver rr = request.getResourceResolver();
         final @Nullable Session jcrSession = rr.adaptTo(Session.class);
@@ -682,7 +666,7 @@ class ServiceUserWebConsolePluginTest {
             request.setAttribute("org.apache.sling.auth.core.ResourceResolver", rr);
         }
 
-        final @NotNull MockSlingHttpServletResponse response = context.response();
+        final @NotNull MockSlingJakartaHttpServletResponse response = context.jakartaResponse();
         plugin.renderContent(request, response);
         final String outputAsString = response.getOutputAsString();
         assertNotNull(outputAsString);
@@ -691,7 +675,7 @@ class ServiceUserWebConsolePluginTest {
     @Test
     void testRenderContentForServiceUserDetailsWithCaughtLoginException()
             throws ServletException, IOException, LoginException {
-        final @NotNull MockSlingHttpServletRequest request = context.request();
+        final @NotNull MockSlingJakartaHttpServletRequest request = context.jakartaRequest();
         Map<String, Object> params = new HashMap<>();
         params.put(ServiceUserWebConsolePlugin.PN_ACTION, "details");
         params.put(ServiceUserWebConsolePlugin.PN_USER, "myserviceuser1");
@@ -700,7 +684,7 @@ class ServiceUserWebConsolePluginTest {
         // simulate the resolverFactory throwing a LoginException
         mockResolverFactoryThrowsLoginException();
 
-        final @NotNull MockSlingHttpServletResponse response = context.response();
+        final @NotNull MockSlingJakartaHttpServletResponse response = context.jakartaResponse();
         plugin.renderContent(request, response);
         final String outputAsString = response.getOutputAsString();
         assertNotNull(outputAsString);
@@ -709,13 +693,13 @@ class ServiceUserWebConsolePluginTest {
 
     @Test
     void testRenderContentForUnknownAction() throws ServletException, IOException {
-        final @NotNull MockSlingHttpServletRequest request = context.request();
+        final @NotNull MockSlingJakartaHttpServletRequest request = context.jakartaRequest();
 
         Map<String, Object> params = new HashMap<>();
         params.put(ServiceUserWebConsolePlugin.PN_ACTION, "invalid");
         request.setParameterMap(params);
 
-        final @NotNull MockSlingHttpServletResponse response = context.response();
+        final @NotNull MockSlingJakartaHttpServletResponse response = context.jakartaResponse();
         plugin.renderContent(request, response);
         final String outputAsString = response.getOutputAsString();
         assertNotNull(outputAsString);
