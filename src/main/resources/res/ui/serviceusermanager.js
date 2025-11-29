@@ -14,14 +14,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-var repeatingRemove = function(){
+const repeatingRemove = function(){
 	$(this).parents('.repeating-item').remove();
 	return false;
 }
 $('.repeating-remove').click(repeatingRemove);
 $('.repeating-add').click(function(){
-	var idx = $('.repeating-container').data('length');
-	var div = $('.repeating-container').append('<tr class="repeating-item"><td>'+'<input type="text"  name="acl-path-'
+	const idx = $('.repeating-container').data('length');
+	const div = $('.repeating-container').append('<tr class="repeating-item"><td>'+'<input type="text"  name="acl-path-'
 			+ idx + '"  style="width:100%" /></td><td>'+
 			'<input type="text" list="data-privileges" name="acl-privilege-' + idx + '" style="width:100%" />'+
 			'</td><td><input type="button" value="-" class="repeating-remove" /></td></tr>');

@@ -27,10 +27,6 @@ import javax.jcr.security.AccessControlList;
 import javax.jcr.security.AccessControlManager;
 import javax.jcr.security.AccessControlPolicy;
 import javax.jcr.security.Privilege;
-import javax.servlet.Servlet;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -54,14 +50,17 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.StreamSupport;
 
+import jakarta.servlet.Servlet;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
-import org.apache.felix.webconsole.AbstractWebConsolePlugin;
-import org.apache.felix.webconsole.WebConsoleConstants;
-import org.apache.felix.webconsole.WebConsoleUtil;
+import org.apache.felix.webconsole.servlet.AbstractServlet;
+import org.apache.felix.webconsole.servlet.ServletConstants;
 import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.api.security.principal.PrincipalManager;
 import org.apache.jackrabbit.api.security.user.Authorizable;
@@ -102,12 +101,12 @@ import org.slf4j.LoggerFactory;
         service = Servlet.class,
         property = {
             Constants.SERVICE_DESCRIPTION + "=Apache Sling Service User Manager Web Console Plugin",
-            WebConsoleConstants.PLUGIN_LABEL + "=" + ServiceUserWebConsolePlugin.LABEL,
-            WebConsoleConstants.PLUGIN_TITLE + "=" + ServiceUserWebConsolePlugin.TITLE,
-            WebConsoleConstants.PLUGIN_CATEGORY + "=Sling"
+            ServletConstants.PLUGIN_LABEL + "=" + ServiceUserWebConsolePlugin.LABEL,
+            ServletConstants.PLUGIN_TITLE + "=" + ServiceUserWebConsolePlugin.TITLE,
+            ServletConstants.PLUGIN_CATEGORY + "=Sling"
         })
 @SuppressWarnings("serial")
-public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
+public class ServiceUserWebConsolePlugin extends AbstractServlet {
 
     private static final String PROP_USER_MAPPING = "user.mapping";
     private static final String NT_SLING_OSGI_CONFIG = "sling:OsgiConfig";
@@ -133,15 +132,15 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
 
     private static final Logger log = LoggerFactory.getLogger(ServiceUserWebConsolePlugin.class);
 
-    private final BundleContext bundleContext;
+    private final transient BundleContext bundleContext;
 
-    private final XSSAPI xss;
+    private final transient XSSAPI xss;
 
-    private final ResourceResolverFactory resolverFactory;
+    private final transient ResourceResolverFactory resolverFactory;
 
-    private final ServiceUserMapper mapper;
+    private final transient ServiceUserMapper mapper;
 
-    private final ConfigurationAdmin configAdmin;
+    private final transient ConfigurationAdmin configAdmin;
 
     @Activate
     public ServiceUserWebConsolePlugin(
@@ -362,8 +361,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                                     StandardCharsets.UTF_8.toString()));
                     params.add(PN_USER + "=" + URLEncoder.encode(name, StandardCharsets.UTF_8.toString()));
 
-                    WebConsoleUtil.sendRedirect(
-                            request, response, "/system/console/" + LABEL + "?" + StringUtils.join(params, "&"));
+                    response.sendRedirect("/system/console/" + LABEL + "?" + StringUtils.join(params, "&"));
                 } else {
                     sendErrorRedirect(request, response, "Unable to update service user permissions!");
                 }
@@ -509,11 +507,6 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
         return bundles;
     }
 
-    @Override
-    public String getLabel() {
-        return LABEL;
-    }
-
     private Resource getOrCreateServiceUser(HttpServletRequest request, ResourceResolver resolver) {
 
         final String name = getParameter(request, PN_NAME, "");
@@ -602,7 +595,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
     }
 
     /**
-     * Called internally by {@link AbstractWebConsolePlugin} to load resources.
+     * Called internally by {@link AbstractServlet} to load resources.
      *
      * This particular implementation depends on the label. As example, if the
      * plugin is accessed as <code>/system/console/abc</code>, and the plugin
@@ -614,6 +607,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
      * @param path the path to read.
      * @return the URL of the resource or <code>null</code> if not found.
      */
+    @Override
     protected URL getResource(String path) {
         String base = "/" + LABEL + "/";
         return (path != null && path.startsWith(base))
@@ -642,11 +636,6 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
             }
         }
         return names;
-    }
-
-    @Override
-    public String getTitle() {
-        return TITLE;
     }
 
     private boolean hasPrincipal(Mapping map, String name) {
@@ -803,7 +792,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                 pw.print("<a href='/system/console/configMgr/");
                 pw.print(xss.encodeForHTMLAttr(configPid));
                 pw.print("'>");
-                pw.print(xss.encodeForHTML(ObjectUtils.defaultIfNull(configPid, "")));
+                pw.print(xss.encodeForHTML(ObjectUtils.getIfNull(configPid, "")));
                 pw.print("</a>");
                 pw.println("<br>");
             }
@@ -955,7 +944,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
     }
 
     @Override
-    protected void renderContent(HttpServletRequest request, HttpServletResponse response)
+    public void renderContent(HttpServletRequest request, HttpServletResponse response)
             throws ServletException, IOException {
 
         final PrintWriter pw = response.getWriter();
@@ -1046,8 +1035,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
 
         params.add(PN_ALERT + "=" + URLEncoder.encode(alert, StandardCharsets.UTF_8.toString()));
 
-        WebConsoleUtil.sendRedirect(
-                request, response, "/system/console/" + LABEL + "?" + StringUtils.join(params, "&"));
+        response.sendRedirect("/system/console/" + LABEL + "?" + StringUtils.join(params, "&"));
     }
 
     private void tableEnd(PrintWriter pw) {
@@ -1090,7 +1078,7 @@ public class ServiceUserWebConsolePlugin extends AbstractWebConsolePlugin {
                 for (int i = 0; i < Array.getLength(value); i++) {
                     Object itemValue = Array.get(value, i);
                     pw.print(xss.encodeForHTML(
-                            ObjectUtils.defaultIfNull(itemValue, "").toString()));
+                            ObjectUtils.getIfNull(itemValue, "").toString()));
                     pw.println("<br>");
                 }
             } else {
