@@ -40,6 +40,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Dictionary;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.Iterator;
@@ -287,8 +288,8 @@ public class ServiceUserWebConsolePlugin extends AbstractServlet {
 
         Object mappingsValue = getFn.apply(PROP_USER_MAPPING);
         String[] mappings;
-        if (mappingsValue instanceof String[]) {
-            mappings = (String[]) mappingsValue;
+        if (mappingsValue instanceof String[] stringArray) {
+            mappings = stringArray;
         } else {
             mappings = new String[0];
         }
@@ -553,16 +554,28 @@ public class ServiceUserWebConsolePlugin extends AbstractServlet {
 
     private List<Pair<String, String>> getPrivileges(HttpServletRequest request) {
         List<Pair<String, String>> privileges = new ArrayList<>();
-        List<String> params = Collections.list(request.getParameterNames());
+
+        List<String> params = new ArrayList<>();
+        // filter the parameter names
+        Enumeration<String> parameterNames = request.getParameterNames();
+        while (parameterNames.hasMoreElements()) {
+            String paramName = parameterNames.nextElement();
+            if (paramName.startsWith("acl-path-")) {
+                params.add(paramName);
+            }
+        }
 
         for (String param : params) {
-            if (param.startsWith("acl-path-")) {
-                String path = request.getParameter(param);
-                String privilege = request.getParameter(param.replace("-path-", "-privilege-"));
-                if (StringUtils.isNotBlank(path) && StringUtils.isNotBlank(privilege)) {
-                    privileges.add(new ImmutablePair<>(path, privilege));
+            String path = request.getParameter(param);
+            if (StringUtils.isEmpty(path)) {
+                log.warn("Unable to load ACL due to missing value for parameter {}", param);
+            } else {
+                String privilegeParam = param.replace("-path-", "-privilege-");
+                String privilege = request.getParameter(privilegeParam);
+                if (StringUtils.isEmpty(privilege)) {
+                    log.warn("Unable to load ACL due to missing value for parameter {}", privilegeParam);
                 } else {
-                    log.warn("Unable to load ACL due to missing value {}={}", path, privilege);
+                    privileges.add(new ImmutablePair<>(path, privilege));
                 }
             }
         }
@@ -1143,8 +1156,7 @@ public class ServiceUserWebConsolePlugin extends AbstractServlet {
                 AccessControlPolicy[] policies = accessManager.getPolicies(pol.getKey());
                 List<String> toRemove = new ArrayList<>();
                 for (AccessControlPolicy p : policies) {
-                    if (p instanceof AccessControlList) {
-                        AccessControlList policy = (AccessControlList) p;
+                    if (p instanceof AccessControlList policy) {
                         for (AccessControlEntry entry : policy.getAccessControlEntries()) {
                             Principal prin = entry.getPrincipal();
                             if (prin.getName().equals(name)) {
@@ -1176,8 +1188,7 @@ public class ServiceUserWebConsolePlugin extends AbstractServlet {
                 AccessControlPolicy[] policies = accessManager.getPolicies(oldPolicy);
                 AccessControlEntry toRemove = null;
                 for (AccessControlPolicy p : policies) {
-                    if (p instanceof AccessControlList) {
-                        AccessControlList policy = (AccessControlList) p;
+                    if (p instanceof AccessControlList policy) {
                         toRemove = Arrays.stream(policy.getAccessControlEntries())
                                 .filter(entry -> entry.getPrincipal().getName().equals(name))
                                 .findFirst()
