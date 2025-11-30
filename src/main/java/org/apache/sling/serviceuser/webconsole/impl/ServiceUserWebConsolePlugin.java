@@ -560,7 +560,7 @@ public class ServiceUserWebConsolePlugin extends AbstractServlet {
         Enumeration<String> parameterNames = request.getParameterNames();
         while (parameterNames.hasMoreElements()) {
             String paramName = parameterNames.nextElement();
-            if (paramName.startsWith("acl-path-")) {
+            if (paramName.matches("^acl-path-\\d+$")) {
                 params.add(paramName);
             }
         }
